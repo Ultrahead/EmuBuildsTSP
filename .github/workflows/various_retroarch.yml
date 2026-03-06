@@ -1,0 +1,103 @@
+name: Build RetroArch (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout RetroArch
+        run: |
+          git clone --recurse-submodules --depth 1 https://github.com/libretro/RetroArch.git RetroArch
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_retroarch.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get install -y build-essential git wget unzip pkg-config \
+                  libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev \
+                  libasound2-dev libudev-dev libfreetype6-dev libx11-dev
+          
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Injecting custom SDL2 into the environment
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
+
+          echo '=== Configuring RetroArch ==='
+          cd /build/RetroArch
+          
+          # Your exact TSP configuration flags
+          ./configure --prefix=/build/retroarch_installed \
+                      --disable-x11 \
+                      --disable-wayland \
+                      --disable-qt \
+                      --disable-kms \
+                      --disable-opengl \
+                      --disable-opengl1 \
+                      --disable-opengl_core \
+                      --disable-ffmpeg \
+                      --disable-pulse \
+                      --disable-oss \
+                      --disable-neon \
+                      --disable-videocore \
+                      --enable-egl \
+                      --enable-opengles \
+                      --enable-opengles3_1 \
+                      --enable-vulkan \
+                      --with-sdl2 \
+                      --with-vulkan
+
+          echo '=== Compiling RetroArch ==='
+          make -j$(nproc)
+          
+          echo '=== Installing to Prefix ==='
+          make install
+          
+          echo '=== Stripping Binary ==='
+          strip /build/retroarch_installed/bin/retroarch
+          
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_retroarch.sh
+          
+          # Run the container in native ARM64 mode via QEMU
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_retroarch.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retroarch_tsp_debian11_arm64
+          path: retroarch_installed/

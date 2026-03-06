@@ -1,0 +1,116 @@
+name: Build TI-99/4A Sim (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_ti99sim.sh
+          #!/bin/bash
+          set -e
+          
+          retry_apt() {
+            local n=1
+            local max=3
+            local delay=5
+            while true; do
+              "$@" && break || {
+                if [[ $n -lt $max ]]; then
+                  ((n++))
+                  echo "Apt command failed. Attempt $n/$max in $delay seconds..."
+                  sleep $delay;
+                else
+                  echo "The command has failed after $n attempts."
+                  return 1
+                fi
+              }
+            done
+          }
+
+          echo '=== Installing Build Dependencies ==='
+          retry_apt apt-get update
+          retry_apt apt-get install -y --fix-missing build-essential wget curl xz-utils unzip pkg-config coreutils make \
+                  libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libssl-dev
+          
+          echo '=== Safeguard: Fixing Permissions ==='
+          chown -R root:root /build
+          
+          echo '=== Fetching Latest ti99sim Source ==='
+          BASE_URL="https://www.mrousseau.org/programs/ti99sim/archives/"
+          LATEST_FILE=$(curl -s $BASE_URL | grep -oP 'ti99sim-[\d\.]+\.src\.tar\.xz' | sort -V | tail -1)
+          
+          if [ -z "$LATEST_FILE" ]; then
+            echo "ERROR: Could not find latest source file at $BASE_URL"
+            exit 1
+          fi
+          
+          echo "Downloading $LATEST_FILE..."
+          wget "${BASE_URL}${LATEST_FILE}"
+          tar -xvf "$LATEST_FILE"
+          cd ti99sim-*/
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Environment Setup
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Compiling TI-99/4A Simulator ==='
+          make -j$(nproc)
+
+          echo '=== Collecting Binaries Manually ==='
+          mkdir -p /build/output
+          
+          # The project build system puts binaries in a 'bin' folder relative to the source
+          if [ -d "bin" ]; then
+            cp -r bin/* /build/output/
+          fi
+          
+          # Also try the standard install just in case of support files
+          make install PREFIX=/build/output || true
+          
+          echo '=== Stripping Binaries ==='
+          find /build/output -type f -executable -exec strip {} + || true
+          
+          echo '=== Final Check ==='
+          ls -R /build/output
+          EOF
+
+          chmod +x build_ti99sim.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_ti99sim.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ti99sim_standalone_tsp_arm64
+          path: output/

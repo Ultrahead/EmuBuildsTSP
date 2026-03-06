@@ -1,0 +1,110 @@
+name: Build XRoar-Dragon32 (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout XRoar
+        run: |
+          # Full clone as the upstream server often rejects shallow clones over HTTP
+          git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_xroar.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          # Standard tools + Audio/Input dev libs required by the configuration
+          apt-get install -y build-essential git wget unzip pkg-config coreutils \
+                  autoconf automake libtool make texinfo \
+                  libasound2-dev libudev-dev libsndfile1-dev libjack-dev \
+                  libgles2-mesa-dev libegl1-mesa-dev
+          
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Injecting custom SDL2 paths for Autotools
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export LDFLAGS="-L/sdl2/lib"
+          export CPPFLAGS="-I/sdl2/include/SDL2"
+
+          echo '=== Running XRoar Build Sequence ==='
+          cd /build/xroar
+          
+          ./autogen.sh
+          
+          # Using the specific configuration options requested
+          # Note: prefix is set to /build/output to capture the build artifacts
+          ./configure --prefix=/build/output \
+                      --without-x \
+                      --without-gtk3 \
+                      --without-gtk2 \
+                      --without-gtkgl \
+                      --without-cocoa \
+                      --without-oss \
+                      --without-pulse \
+                      --without-coreaudio \
+                      --with-jack \
+                      --enable-dragon \
+                      --enable-coco3 \
+                      --enable-mc10 \
+                      --enable-experimental \
+                      --enable-ui-sdl \
+                      --disable-gdb-target \
+                      --disable-sdltest
+
+          make -j$(( $(nproc) + 1))
+          
+          # Using prefix-based install to mapped volume
+          make install
+          
+          echo '=== Stripping Binary ==='
+          if [ -f "/build/output/bin/xroar" ]; then
+            strip /build/output/bin/xroar
+          fi
+          
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_xroar.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_xroar.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xroar_dragon32_standalone_tsp_arm64
+          path: output/

@@ -1,0 +1,130 @@
+name: Build OpenBOR (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout OpenBOR
+        run: |
+          git clone --recurse-submodules --depth 1 https://github.com/DCurrent/openbor.git openbor
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_openbor.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get install -y build-essential git wget unzip pkg-config coreutils make \
+                  libvorbis-dev libvpx-dev libvulkan-dev libgles2-mesa-dev libegl1-mesa-dev \
+                  libpng-dev systemd locales-all python3 python3-pip
+          
+          pip3 install cmake
+          
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Patching Source Code & Build System ==='
+          cd /build/openbor
+
+          # 1. Overwrite linux.cmake options
+          cat << 'OPTIONSEOF' > cmake/linux.cmake
+          set(USE_SDL     ON)
+          set(USE_OPENGL  OFF)
+          set(USE_LOADGL  OFF)
+          set(USE_GFX     ON)
+          set(USE_VORBIS  ON)
+          set(USE_WEBM    ON)
+          set(USE_PTHREAD ON)
+          set(ENABLE_STATIC ON)
+          OPTIONSEOF
+
+          # 2. Fix mallinfo2 -> mallinfo
+          sed -i 's/mallinfo2()/mallinfo()/g' engine/source/utils.c
+
+          # 3. Direct Source Patching (The Ultimate Checkmate for stricmp)
+          # This physically replaces the function calls in every C file, bypassing CMake entirely.
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\bstricmp\b/strcasecmp/g; s/\bstrnicmp\b/strncasecmp/g' {} +
+
+          # 4. Force Symbol Resolution and Dependency Links
+          python3 -c '
+          import re
+          path = "CMakeLists.txt"
+          with open(path, "r") as f:
+              content = f.read()
+          
+          # A) Relax Warnings to prevent unused variable/label breaks
+          content = content.replace("-Werror", "-Wno-error")
+          
+          # B) Ensure PTHREAD and SDL2 linking logic is correct
+          new_pthread = "if(USE_PTHREAD)\n  find_package(Threads REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)\nendif()"
+          content = re.sub(r"if\(USE_PTHREAD\).*?endif\(\)", new_pthread, content, flags=re.DOTALL)
+          
+          new_sdl2 = "find_package(SDL2 REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)"
+          content = re.sub(r"find_package\(SDL2 REQUIRED\).*?target_link_libraries\(.*?SDL2::SDL2\)", new_sdl2, content, flags=re.DOTALL)
+
+          with open(path, "w") as f:
+              f.write(content)
+          '
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          export PATH="/usr/local/bin:/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Configuring & Compiling OpenBOR ==='
+          mkdir -p build && cd build
+          
+          # FIX: Create the missing releases directory so the post-build copy command succeeds
+          mkdir -p ../engine/releases
+          
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -Wno-dev
+          make -j$(nproc)
+
+          echo '=== Packaging Binary ==='
+          mkdir -p /build/output
+          if [ -f "OpenBOR" ]; then
+            strip OpenBOR
+            cp OpenBOR /build/output/OpenBOR
+          fi
+          EOF
+
+          chmod +x build_openbor.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_openbor.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openbor_standalone_tsp_arm64
+          path: output/OpenBOR

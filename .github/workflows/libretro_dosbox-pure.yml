@@ -1,0 +1,79 @@
+name: Build Dosbox-Pure (Libretro) Linux ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout Dosbox-Pure
+        run: |
+          git clone --depth 1 --branch main https://github.com/schellingb/dosbox-pure.git dosbox-pure
+          cd dosbox-pure
+          git submodule update --init --recursive --depth 1
+
+      - name: Build in Ubuntu 20.04 Container
+        run: |
+          # 1. Generate the build script as a file to avoid string escaping issues
+          cat << 'EOF' > build_dosbox.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Environment ==='
+          apt-get update
+          apt-get install -y software-properties-common wget python3 pkg-config build-essential git unzip coreutils make
+          apt-get install -y gcc-10 g++-10 gcc-10-aarch64-linux-gnu g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+          echo '=== Deploying Custom SDL2 ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Use DOUBLE QUOTES to correctly expand the PATH
+          export PATH="/sdl2/bin:$PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          
+          echo '=== Verifying Environment ==='
+          which nproc
+          sdl2-config --version
+          
+          echo '=== Compiling Dosbox Pure ==='
+          cd /build/dosbox-pure
+          
+          make -j$(nproc) \
+                platform=unix \
+                PLATFORM=arm64 \
+                TARGETOS=linux \
+                PTR64=1 \
+                NOWERROR=1 \
+                CROSS_BUILD=1 \
+                HOSTCC=gcc-10 \
+                HOSTCXX=g++-10 \
+                CC=aarch64-linux-gnu-gcc-10 \
+                CXX=aarch64-linux-gnu-g++-10 \
+                STRIP=aarch64-linux-gnu-strip \
+                EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                LDFLAGS='-shared -L/sdl2/lib -Wl,--hash-style=both'
+          EOF
+
+          # 2. Run the script inside the container
+          chmod +x build_dosbox.sh
+          docker run --rm -v ${{ github.workspace }}:/build -e DEBIAN_FRONTEND=noninteractive ubuntu:20.04 /build/build_dosbox.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dosbox-pure_libretro_arm64_smartpro
+          path: dosbox-pure/dosbox_pure_libretro.so

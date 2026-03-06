@@ -1,0 +1,97 @@
+name: Build Flycast (Libretro) Linux ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout Flycast
+        run: git clone --recurse-submodules --shallow-submodules --depth 1 https://github.com/flyinghead/flycast.git flycast
+
+      - name: Build in Ubuntu 20.04 Container
+        run: |
+          cat << 'EOF' > build_flycast.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Environment ==='
+          apt-get update
+          apt-get install -y software-properties-common wget python3 python3-pip pkg-config \
+                  build-essential git mesa-common-dev libgles2-mesa-dev libegl1-mesa-dev \
+                  curl libcurl4-openssl-dev libudev-dev liblua5.2-dev unzip \
+                  coreutils make
+          
+          # Install latest CMake via pip because apt version is too old
+          pip3 install --upgrade cmake
+          
+          echo '=== Installing Cross-Compiler ==='
+          apt-get install -y gcc-10 g++-10 gcc-10-aarch64-linux-gnu g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          
+          echo '=== Deploying Custom SDL2 ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          echo '=== Configuring Environment Variables ==='
+          # Add both custom SDL2 and Pip's local bin to the PATH
+          export PATH="/usr/local/bin:/sdl2/bin:$PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          
+          echo '=== Verifying Versions ==='
+          cmake --version
+          sdl2-config --version
+          
+          echo '=== Configuring Flycast via CMake ==='
+          cd /build/flycast
+          mkdir -p build && cd build
+          
+          cmake .. -Wno-dev \
+                -DCMAKE_SYSTEM_NAME=Linux \
+                -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+                -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc-10 \
+                -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++-10 \
+                -DCMAKE_C_FLAGS='-I/sdl2/include/SDL2' \
+                -DCMAKE_CXX_FLAGS='-I/sdl2/include/SDL2 -Wno-psabi' \
+                -DCMAKE_SHARED_LINKER_FLAGS='-L/sdl2/lib -Wl,--hash-style=both' \
+                -DCMAKE_CXX_STANDARD_LIBRARIES='-lrt' \
+                -DCMAKE_C_STANDARD_LIBRARIES='-lrt' \
+                -DSDL2_INCLUDE_DIR='/sdl2/include/SDL2' \
+                -DSDL2_LIBRARY='/sdl2/lib/libSDL2.so' \
+                -DUSE_BREAKPAD=OFF \
+                -DUSE_DISCORD=OFF \
+                -DUSE_GLES=true \
+                -DUSE_GLES2=false \
+                -DUSE_HOST_SDL=true \
+                -DUSE_VULKAN=true \
+                -DUSE_OPENGL=true \
+                -DUSE_ALSA=true \
+                -DUSE_OPENMP=true \
+                -DLIBRETRO=true
+          
+          echo '=== Compiling Flycast ==='
+          make -j$(nproc)
+          
+          echo '=== Stripping Binary ==='
+          aarch64-linux-gnu-strip /build/flycast/build/flycast_libretro.so
+          EOF
+
+          chmod +x build_flycast.sh
+          docker run --rm -v ${{ github.workspace }}:/build -e DEBIAN_FRONTEND=noninteractive ubuntu:20.04 /build/build_flycast.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast_libretro_arm64_smartpro
+          path: flycast/build/flycast_libretro.so

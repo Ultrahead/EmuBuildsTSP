@@ -1,0 +1,112 @@
+name: Build Flycast (standalone) Linux ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout Flycast
+        run: git clone --recurse-submodules --shallow-submodules --depth 1 https://github.com/flyinghead/flycast.git flycast
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_script.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get install -y wget python3 python3-pip pkg-config build-essential git curl unzip \
+                  libgles2-mesa-dev libegl1-mesa-dev libcurl4-openssl-dev libudev-dev \
+                  liblua5.2-dev libasound2-dev libx11-dev libxext-dev libxrandr-dev \
+                  libxrender-dev libdrm-dev libgbm-dev
+          
+          pip3 install cmake
+          
+          echo '=== Deploying Custom SDL2 Blob ==='
+          cd /
+          # Using the raw link to the zip file
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          echo '=== Configuring Environment Variables ==='
+          export PATH="/sdl2/bin:$PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          
+          echo '=== Verifying SDL2 Detection ==='
+          SDL_VERSION=$(sdl2-config --version)
+          echo "Detected SDL2 Version: $SDL_VERSION"
+          if [ "$SDL_VERSION" != "2.26.1" ]; then
+            echo "ERROR: SDL2 version mismatch! Expected 2.26.1, got $SDL_VERSION"
+            exit 1
+          fi
+
+          echo '=== Configuring Flycast ==='
+          cd /build/flycast
+          mkdir -p build && cd build
+          
+          cmake .. -Wno-dev \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_FLAGS='-Wno-psabi' \
+                -DSDL2_INCLUDE_DIR='/sdl2/include/SDL2' \
+                -DSDL2_LIBRARY='/sdl2/lib/libSDL2.so' \
+                -DUSE_HOST_SDL=true \
+                -DUSE_BREAKPAD=OFF \
+                -DUSE_DISCORD=OFF \
+                -DUSE_GLES=true \
+                -DUSE_GLES2=false \
+                -DUSE_VULKAN=true \
+                -DUSE_OPENGL=true \
+                -DUSE_DX9=false \
+                -DUSE_DX11=false \
+                -DUSE_ALSA=true \
+                -DUSE_PULSEAUDIO=false \
+                -DUSE_HOST_GLSLANG=false \
+                -DUSE_OPENMP=true \
+                -DLIBRETRO=false
+          
+          echo '=== Compiling Flycast ==='
+          make -j$(nproc)
+          
+          echo '=== Verifying Binary Linking ==='
+          ldd /build/flycast/build/flycast | grep -i "sdl"
+          
+          echo '=== Stripping Binary ==='
+          strip /build/flycast/build/flycast
+          EOF
+
+          chmod +x build_script.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_script.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast_standalone_arm64_smartpro
+          path: flycast/build/flycast

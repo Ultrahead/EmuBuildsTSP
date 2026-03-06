@@ -1,0 +1,92 @@
+name: Build SimCoupe (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout SimCoupe (Dev Branch)
+        run: |
+          # Fixing the repository URL to the correct author (simonowen)
+          git clone --branch dev --recurse-submodules --depth 1 https://github.com/simonowen/simcoupe.git simcoupe
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_simcoupe.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          # Added libbz2-dev to resolve the BZip2 missing dependency
+          apt-get install -y build-essential git wget unzip pkg-config coreutils make cmake \
+                  libasound2-dev libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libbz2-dev
+          
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Environment Setup
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include:/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Configuring & Compiling SimCoupe ==='
+          cd /build/simcoupe
+          mkdir -p build && cd build
+          
+          # Configure CMake for a release build
+          # FIX: Forcing CMake to find our SDL2 variables since its custom FindSDL2.cmake ignores pkg-config
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+                   -DCMAKE_PREFIX_PATH=/sdl2 \
+                   -DSDL2_INCLUDE_DIR=/sdl2/include/SDL2 \
+                   -DSDL2_LIBRARY=/sdl2/lib/libSDL2.so
+          
+          # Compile
+          make -j$(nproc)
+
+          echo '=== Packaging Binary ==='
+          mkdir -p /build/output
+          if [ -f "simcoupe" ]; then
+             strip simcoupe
+             cp simcoupe /build/output/simcoupe
+          fi
+          EOF
+
+          chmod +x build_simcoupe.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_simcoupe.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simcoupe_standalone_tsp_arm64
+          path: output/simcoupe

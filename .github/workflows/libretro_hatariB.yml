@@ -1,0 +1,91 @@
+name: Build HatariB (Libretro) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout HatariB
+        run: |
+          git clone --depth 1 https://github.com/bbbradsmith/hatariB.git hatariB
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_hatarib.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          # Added zlib1g-dev to provide zlib.h
+          apt-get install -y build-essential git wget unzip pkg-config coreutils make cmake zlib1g-dev
+          
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          # Environment Setup
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Compiling HatariB ==='
+          cd /build/hatariB
+          
+          # Pre-sync submodules to ensure no network issues mid-make
+          git submodule update --init --recursive
+          
+          # Native ARM64 build via QEMU
+          make -j$(nproc) full
+
+          echo '=== Renaming and Stripping Binary ==='
+          mkdir -p /build/output
+          if [ -f "build/hatarib.so" ]; then
+            cp build/hatarib.so /build/output/hatariB_libretro.so
+            strip /build/output/hatariB_libretro.so
+          else
+            echo "ERROR: build/hatarib.so not found!"
+            ls -R build/
+            exit 1
+          fi
+          
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_hatarib.sh
+          
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_hatarib.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatariB_libretro_arm64_smartpro
+          path: output/hatariB_libretro.so
