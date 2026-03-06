@@ -1,0 +1,86 @@
+name: Build Custom SDL2 (Debian 11 ARM64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-sdl2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build SDL2 in Debian 11 Container
+        run: |
+          # 1. Create the build script file
+          cat << 'EOF' > sdl2_build.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get install -y wget build-essential git libegl1-mesa-dev libgles2-mesa-dev \
+                  libvulkan-dev libasound2-dev alsa-utils libsamplerate-dev pkg-config
+
+          echo '=== Downloading SDL 2.26.1 Source ==='
+          wget https://github.com/trimui/toolchain_sdk_smartpro/releases/download/20231018/SDL2-2.26.1.GE8300.tgz
+          tar -xzf SDL2-2.26.1.GE8300.tgz
+          cd SDL2-2.26.1
+
+          echo '=== Configuring SDL2 ==='
+          # We use /sdl2 as the prefix for internal consistency
+          ./configure --prefix=/sdl2 \
+            --disable-dummyaudio --disable-pulseaudio --disable-oss --disable-sndio \
+            --enable-alsa --enable-shared --enable-static --enable-assembly \
+            --enable-arm-simd --enable-arm-neon --enable-loadso --enable-video-mali \
+            --disable-video-opengl --enable-video-opengles2 --enable-video-opengles1 \
+            --enable-video-opengles --disable-video-offscreen --enable-video-vulkan \
+            --disable-video-wayland --disable-wayland-shared --disable-video-x11 \
+            --disable-x11-shared --disable-video-x11-xcursor --disable-video-x11-xdbe \
+            --disable-video-x11-xinput --disable-video-x11-xfixes --disable-video-x11-xrandr \
+            --disable-video-x11-scrnsaver --disable-video-x11-xshape --disable-video-vivante \
+            --disable-video-cocoa --disable-video-rpi --disable-video-metal --disable-render-metal \
+            --disable-video-kmsdrm --disable-kmsdrm-shared --disable-video-dummy --disable-arts \
+            --disable-esd --enable-joystick --enable-haptic --enable-pthreads --enable-pthread-sem \
+            --disable-hidapi --disable-sensor --disable-power \
+            LDFLAGS="-lEGL -lGLESv2"
+
+          echo '=== Compiling and Installing ==='
+          make -j$(nproc)
+          make install
+
+          echo '=== Moving Files to Workspace for Artifact Upload ==='
+          # Copy from the container's /sdl2 to the mapped /build/sdl2
+          mkdir -p /build/sdl2
+          cp -r /sdl2/* /build/sdl2/
+          
+          echo '=== SDL2 Build Complete ==='
+          EOF
+
+          chmod +x sdl2_build.sh
+          
+          # 2. Execute the container with resource priority
+          # The -v mapping ensures that /build/sdl2 maps to the GitHub workspace
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/sdl2_build.sh
+
+      - name: Upload SDL2 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdl2-debian11-arm64-tsp
+          path: sdl2/  # This refers to the 'sdl2' folder now in your workspace
+  
