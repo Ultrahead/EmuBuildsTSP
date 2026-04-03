@@ -42,11 +42,15 @@ jobs:
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          echo 'Step 1'
           mkdir -p /sdl2
+          echo 'Step 2'
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-
+          echo 'Step 3'
           export PATH="/sdl2/bin:$PATH"
+          echo 'Step 4'
           export CCACHE_DIR=/root/.ccache
+          echo 'Step 5'
           ccache -M 5G
 
           echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
