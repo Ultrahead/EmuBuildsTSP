@@ -36,7 +36,7 @@ jobs:
                   libasound2-dev libudev-dev libfreetype6-dev libx11-dev
           
           echo '=== Deploying Custom SDL2 Blob ==='
-          wget -q https://github.com/Ultrahead/lme/raw/main/blobs/SDL2-2.26.1_TSP.zip
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
