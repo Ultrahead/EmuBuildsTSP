@@ -41,18 +41,14 @@ jobs:
                   g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Deploying Custom SDL2 ==='
-          wget -q https://github.com/Ultrahead/EmuBuildsTSP/blob/3a07a4d9ffce0bddcf5e221ce5f55c150983cd99/blobs/SDL2-2.26.1_TSP.zip
-          echo 'Step 1'
+          wget -q wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
-          echo 'Step 2'
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          echo 'Step 3'
+          
           export PATH="/sdl2/bin:$PATH"
-          echo 'Step 4'
           export CCACHE_DIR=/root/.ccache
-          echo 'Step 5'
           ccache -M 5G
-
+          
           echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
           cd /build/mame
           grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
