@@ -77,7 +77,7 @@ jobs:
           
           docker run --rm \
             --platform linux/arm64 \
-            --cpus="4.0" \
+            --cpus="2.0" \
             --cpu-shares=4096 \
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
