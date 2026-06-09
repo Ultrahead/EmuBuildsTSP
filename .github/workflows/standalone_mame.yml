@@ -1,0 +1,98 @@
+name: Build MAME (Standalone) Linux ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout MAME
+        run: |
+          git clone --depth 1 --branch master https://github.com/mamedev/mame.git mame
+          cd mame
+          git submodule update --init --recursive --depth 1
+
+      - name: CCache Initialization
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: mame-standalone-ccache-${{ github.run_id }}
+          restore-keys: |
+            mame-standalone-ccache-
+
+      - name: Build in Ubuntu 20.04 Container
+        run: |
+          cat << 'EOF' > build_mame.sh
+          #!/bin/bash
+          set -e
+          
+          echo '=== Setting up Build Environment ==='
+          apt-get update
+          apt-get install -y software-properties-common wget python3 pkg-config \
+                  build-essential git unzip ccache coreutils make
+          apt-get install -y gcc-10 g++-10 gcc-10-aarch64-linux-gnu \
+                  g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          
+          echo '=== Deploying Custom SDL2 ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          export PATH="/sdl2/bin:$PATH"
+          export CCACHE_DIR=/root/.ccache
+          ccache -M 5G
+          
+          echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
+          cd /build/mame
+          grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
+          grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
+          
+          echo '=== Building GENie (Natively) ==='
+          cd /build/mame/3rdparty/genie/build/gmake.linux
+          make clean
+          make -j$(nproc) CC=gcc-10 CXX=g++-10
+          
+          echo '=== Compiling FULL MAME ==='
+          cd /build/mame
+          make -j$(nproc) \
+              OSD=sdl \
+              TARGETOS=linux \
+              PTR64=1 \
+              USE_QTDEBUG=0 \
+              USE_X11=0 \
+              USE_WAYLAND=0 \
+              USE_OPENGL=0 \
+              NOWERROR=1 \
+              CROSS_BUILD=1 \
+              HOSTCC='ccache gcc-10' \
+              HOSTCXX='ccache g++-10' \
+              CC='ccache aarch64-linux-gnu-gcc-10' \
+              CXX='ccache aarch64-linux-gnu-g++-10' \
+              PYTHON_EXECUTABLE=python3 \
+              EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+              EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+              LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+              
+          aarch64-linux-gnu-strip /build/mame/mame
+          EOF
+
+          chmod +x build_mame.sh
+          docker run --rm \
+            -v ${{ github.workspace }}:/build \
+            -v ${{ github.workspace }}/.ccache:/root/.ccache \
+            -e DEBIAN_FRONTEND=noninteractive \
+            ubuntu:20.04 /build/build_mame.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mame_standalone_arm64_smartpro
+          path: mame/mame
