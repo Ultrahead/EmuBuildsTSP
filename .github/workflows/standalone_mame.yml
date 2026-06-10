@@ -58,11 +58,6 @@ jobs:
           export CCACHE_DIR=/root/.ccache
           ccache -M 5G
           
-          echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
-          cd /build/mame
-          grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
-          grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
-          
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
@@ -74,23 +69,25 @@ jobs:
               OSD=sdl \
               TARGETOS=linux \
               PTR64=1 \
-              USE_QTDEBUG=0 \
-              USE_X11=0 \
-              USE_WAYLAND=0 \
-              USE_OPENGL=0 \
-              USE_BGFX=0 \
+              UNAME_M=aarch64 \
+              NO_QTDEBUG=1 \
+              NO_X11=1 \
+              NO_WAYLAND=1 \
+              NO_OPENGL=1 \
+              NO_BGFX=1 \
+              NO_USE_XINPUT=1 \
               NOWERROR=1 \
               CROSS_BUILD=1 \
               HOSTCC='ccache gcc-11' \
               HOSTCXX='ccache g++-11' \
-              CC='ccache aarch64-none-linux-gnu-gcc' \
-              CXX='ccache aarch64-none-linux-gnu-g++' \
+              OVERRIDE_CC='ccache aarch64-none-linux-gnu-gcc' \
+              OVERRIDE_CXX='ccache aarch64-none-linux-gnu-g++' \
               PYTHON_EXECUTABLE=python3 \
               EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
               
-          aarch64-none-linux-gnu-strip /build/mame/mame
+          aarch64-none-linux-gnu-strip /build/mame/mame* || true
           EOF
 
           chmod +x build_mame.sh
@@ -105,4 +102,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame
+          path: mame/mame*
