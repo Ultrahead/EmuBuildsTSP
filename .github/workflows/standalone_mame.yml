@@ -59,11 +59,6 @@ jobs:
           export CCACHE_DIR=/root/.ccache
           ccache -M 5G
           
-          echo '=== NUCLEAR PURGE: Eradicating x86 flags from GENie ==='
-          cd /build/mame
-          find scripts -type f -name "*.lua" -exec sed -i 's/-m64//g' {} +
-          find scripts -type f -name "*.lua" -exec sed -i 's/-m32//g' {} +
-          
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
@@ -74,6 +69,7 @@ jobs:
           make -j$(nproc) \
               OSD=sdl \
               TARGETOS=linux \
+              ARCHITECTURE=_aarch64 \
               PTR64=1 \
               TARGET_SUFFIX= \
               USE_X11=0 \
