@@ -1,4 +1,4 @@
-name: Build MAME (Standalone) Linux ARM64 (TSP)
+name: Build Standalone MAME Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -37,8 +37,12 @@ jobs:
           apt-get update
           apt-get install -y software-properties-common wget python3 pkg-config \
                   build-essential git unzip ccache coreutils make
-          apt-get install -y gcc-10 g++-10 gcc-10-aarch64-linux-gnu \
-                  g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          
+          echo '=== Updating GCC Toolchain ==='
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
+                  g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -57,7 +61,7 @@ jobs:
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
-          make -j$(nproc) CC=gcc-10 CXX=g++-10
+          make -j$(nproc) CC=gcc-11 CXX=g++-11
           
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
@@ -71,10 +75,10 @@ jobs:
               USE_OPENGL=0 \
               NOWERROR=1 \
               CROSS_BUILD=1 \
-              HOSTCC='ccache gcc-10' \
-              HOSTCXX='ccache g++-10' \
-              CC='ccache aarch64-linux-gnu-gcc-10' \
-              CXX='ccache aarch64-linux-gnu-g++-10' \
+              HOSTCC='ccache gcc-11' \
+              HOSTCXX='ccache g++-11' \
+              CC='ccache aarch64-linux-gnu-gcc-11' \
+              CXX='ccache aarch64-linux-gnu-g++-11' \
               PYTHON_EXECUTABLE=python3 \
               EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
