@@ -64,16 +64,40 @@ jobs:
           make clean
           make -j$(nproc) CC=gcc-11 CXX=g++-11
           
-          echo '=== Compiling FULL MAME ==='
+          echo '=== Generating MAME Project Files ==='
           cd /build/mame
           
-          # Fix Git Dubious Ownership in Docker Volume
+          # Fix Git Dubious Ownership and "No Names Found" errors
           git config --global --add safe.directory /build/mame
+          git tag "tsp-build" || true
           
+          make generate \
+              OSD=sdl \
+              TARGETOS=linux \
+              ARCHITECTURE=_aarch64 \
+              PTR64=1 \
+              USE_X11=0 \
+              USE_WAYLAND=0 \
+              USE_OPENGL=0 \
+              USE_BGFX=0 \
+              USE_QTDEBUG=0 \
+              USE_ALSA=0 \
+              USE_PORTAUDIO=0 \
+              USE_PULSEAUDIO=0 \
+              USE_FONTCONFIG=0 \
+              USE_MIDI=0 \
+              USE_TAP=0 \
+              USE_PCAP=0
+              
+          echo '=== NUCLEAR PURGE: Eradicating x86 flags from Generated Makefiles ==='
+          find build/projects/sdl -type f \( -name "*.make" -o -name "Makefile" \) -exec sed -i 's/-m64//g' {} +
+          find build/projects/sdl -type f \( -name "*.make" -o -name "Makefile" \) -exec sed -i 's/-m32//g' {} +
+          
+          echo '=== Compiling FULL MAME ==='
           make -j$(nproc) \
               OSD=sdl \
               TARGETOS=linux \
-              ARCHITECTURE=_arm64 \
+              ARCHITECTURE=_aarch64 \
               PTR64=1 \
               TARGET_SUFFIX= \
               USE_X11=0 \
@@ -100,7 +124,7 @@ jobs:
               EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
               
-          aarch64-none-linux-gnu-strip /build/mame/mame
+          aarch64-none-linux-gnu-strip /build/mame/mame* || true
           EOF
 
           chmod +x build_mame.sh
@@ -115,4 +139,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame
+          path: mame/mame*
