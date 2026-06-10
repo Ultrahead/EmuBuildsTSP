@@ -66,10 +66,14 @@ jobs:
           
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
+          
+          # Fix Git Dubious Ownership in Docker Volume
+          git config --global --add safe.directory /build/mame
+          
           make -j$(nproc) \
               OSD=sdl \
               TARGETOS=linux \
-              ARCHITECTURE=_aarch64 \
+              ARCHITECTURE=_arm64 \
               PTR64=1 \
               TARGET_SUFFIX= \
               USE_X11=0 \
