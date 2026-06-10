@@ -68,8 +68,8 @@ jobs:
           make -j$(nproc) \
               OSD=sdl \
               TARGETOS=linux \
-              PTR64=1 \
               UNAME_M=aarch64 \
+              TARGET_SUFFIX= \
               NO_QTDEBUG=1 \
               NO_X11=1 \
               NO_WAYLAND=1 \
@@ -87,7 +87,7 @@ jobs:
               EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
               
-          aarch64-none-linux-gnu-strip /build/mame/mame* || true
+          aarch64-none-linux-gnu-strip /build/mame/mame
           EOF
 
           chmod +x build_mame.sh
@@ -102,4 +102,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame*
+          path: mame/mame
