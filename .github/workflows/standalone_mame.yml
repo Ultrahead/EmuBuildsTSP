@@ -1,4 +1,4 @@
-name: Build Standalone MAME Linux ARM64 (TSP)
+name: Build MAME (Standalone) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
