@@ -81,10 +81,10 @@ jobs:
               USE_BGFX=0 \
               NOWERROR=1 \
               CROSS_BUILD=1 \
-              CC='ccache gcc-11' \
-              CXX='ccache g++-11' \
-              OVERRIDE_CC='ccache aarch64-none-linux-gnu-gcc' \
-              OVERRIDE_CXX='ccache aarch64-none-linux-gnu-g++' \
+              HOSTCC='ccache gcc-11' \
+              HOSTCXX='ccache g++-11' \
+              CC='ccache aarch64-none-linux-gnu-gcc' \
+              CXX='ccache aarch64-none-linux-gnu-g++' \
               PYTHON_EXECUTABLE=python3 \
               EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
               EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
