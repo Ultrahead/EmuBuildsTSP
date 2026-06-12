@@ -1,4 +1,4 @@
-name: Build MAME (Standalone) Linux ARM64 (TSP)
+name: Build MAME 0.288 (Standalone) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
 
       - name: Checkout MAME
         run: |
-          git clone --depth 1 --branch master https://github.com/mamedev/mame.git mame
+          git clone --depth 1 --branch 0288 https://github.com/sonninnos/mame.git mame
           cd mame
           git submodule update --init --recursive --depth 1
 
@@ -27,17 +27,23 @@ jobs:
           restore-keys: |
             mame-ccache-
 
-      - name: Build in Ubuntu 20.04 Container
+      - name: Build in Ubuntu 21.04 Container
         run: |
           cat << 'EOF' > build_mame.sh
           #!/bin/bash
           set -e
           
+          echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
+          sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+          
           echo '=== Setting up Build Environment ==='
           apt-get update
           apt-get install -y software-properties-common wget python3 pkg-config \
-                  build-essential git unzip ccache coreutils make xz-utils \
-                  clang-12 lld-12 crossbuild-essential-arm64
+                  build-essential git unzip ccache coreutils make xz-utils
+          
+          echo '=== Installing Native & Cross GCC-11 ==='
+          apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
+                  g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -58,7 +64,7 @@ jobs:
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
-          make -j$(nproc) CC=clang-12 CXX=clang++-12
+          make -j$(nproc) CC=gcc-11 CXX=g++-11
           
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
@@ -74,14 +80,14 @@ jobs:
                 NO_USE_MIDI=1 \
                 USE_OPENGL=0 \
                 USE_BGFX=0 \
-                HOSTCC='ccache clang-12' \
-                HOSTCXX='ccache clang++-12' \
-                CC='ccache clang-12 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu' \
-                CXX='ccache clang++-12 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu' \
+                HOSTCC='ccache gcc-11' \
+                HOSTCXX='ccache g++-11' \
+                CC='ccache aarch64-linux-gnu-gcc-11' \
+                CXX='ccache aarch64-linux-gnu-g++-11' \
                 PYTHON_EXECUTABLE=python3 \
-                EXTRACFLAGS='-I/sdl2/include/SDL2' \
-                EXTRACXXFLAGS='-I/sdl2/include/SDL2' \
-                LDFLAGS='-fuse-ld=lld-12 -L/sdl2/lib -Wl,--hash-style=both'
+                EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
                 
           aarch64-linux-gnu-strip /build/mame/mame
           EOF
@@ -91,7 +97,7 @@ jobs:
             -v ${{ github.workspace }}:/build \
             -v ${{ github.workspace }}/.ccache:/root/.ccache \
             -e DEBIAN_FRONTEND=noninteractive \
-            ubuntu:20.04 /build/build_mame.sh
+            ubuntu:21.04 /build/build_mame.sh
 
       - name: Upload Artifact
         if: success()
