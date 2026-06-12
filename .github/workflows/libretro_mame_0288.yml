@@ -38,21 +38,18 @@ jobs:
           apt-get install -y software-properties-common wget python3 pkg-config \
                   build-essential git unzip ccache coreutils make xz-utils
           
-          echo '=== Adding GCC-11 PPA for Host Compiler ==='
+          echo '=== Adding GCC-11 PPA for Host & Cross Compilers ==='
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
-          apt-get install -y gcc-11 g++-11
-          
-          echo '=== Downloading ARM GCC 11.2 Toolchain ==='
-          wget -q https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu.tar.xz
-          tar -xf gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu.tar.xz -C /opt
+          apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
+                  g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          export PATH="/opt/gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu/bin:/sdl2/bin:$PATH"
+          export PATH="/sdl2/bin:$PATH"
           export CCACHE_DIR=/root/.ccache
           ccache -M 5G
           
@@ -79,14 +76,14 @@ jobs:
                 CROSS_BUILD=1 \
                 HOSTCC='ccache gcc-11' \
                 HOSTCXX='ccache g++-11' \
-                CC='ccache aarch64-none-linux-gnu-gcc' \
-                CXX='ccache aarch64-none-linux-gnu-g++' \
+                CC='ccache aarch64-linux-gnu-gcc-11' \
+                CXX='ccache aarch64-linux-gnu-g++-11' \
                 PYTHON_EXECUTABLE=python3 \
                 EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
                 EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
                 LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
                 
-          aarch64-none-linux-gnu-strip /build/mame/mame_libretro.so
+          aarch64-linux-gnu-strip /build/mame/mame_libretro.so
           EOF
 
           chmod +x build_mame.sh
