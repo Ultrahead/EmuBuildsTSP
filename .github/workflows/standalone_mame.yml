@@ -1,4 +1,4 @@
-name: Build MAME 0.288 (Standalone) Linux ARM64 (TSP)
+name: Build MAME (Standalone) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
 
       - name: Checkout MAME
         run: |
-          git clone --depth 1 --branch 0288 https://github.com/sonninnos/mame.git mame
+          git clone --depth 1 --branch master https://github.com/mamedev/mame.git mame
           cd mame
           git submodule update --init --recursive --depth 1
 
