@@ -36,12 +36,8 @@ jobs:
           echo '=== Setting up Build Environment ==='
           apt-get update
           apt-get install -y software-properties-common wget python3 pkg-config \
-                  build-essential git unzip ccache coreutils make xz-utils
-          
-          echo '=== Adding GCC-11 PPA for Host & Cross Compilers ==='
-          add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          apt-get update
-          apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
+                  build-essential git unzip ccache coreutils make xz-utils \
+                  clang-12 lld-12 crossbuild-essential-arm64
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -62,7 +58,7 @@ jobs:
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
-          make -j$(nproc) CC=gcc-11 CXX=g++-11
+          make -j$(nproc) CC=clang-12 CXX=clang++-12
           
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
@@ -78,14 +74,14 @@ jobs:
                 NO_USE_MIDI=1 \
                 USE_OPENGL=0 \
                 USE_BGFX=0 \
-                HOSTCC='ccache gcc-11' \
-                HOSTCXX='ccache g++-11' \
-                CC='ccache aarch64-linux-gnu-gcc-11' \
-                CXX='ccache aarch64-linux-gnu-g++-11' \
+                HOSTCC='ccache clang-12' \
+                HOSTCXX='ccache clang++-12' \
+                CC='ccache clang-12 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu' \
+                CXX='ccache clang++-12 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu' \
                 PYTHON_EXECUTABLE=python3 \
-                EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-                EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-                LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+                EXTRACFLAGS='-I/sdl2/include/SDL2' \
+                EXTRACXXFLAGS='-I/sdl2/include/SDL2' \
+                LDFLAGS='-fuse-ld=lld-12 -L/sdl2/lib -Wl,--hash-style=both'
                 
           aarch64-linux-gnu-strip /build/mame/mame
           EOF
