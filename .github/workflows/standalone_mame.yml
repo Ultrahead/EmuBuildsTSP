@@ -80,6 +80,8 @@ jobs:
                 USE_X11=0 \
                 USE_WAYLAND=0 \
                 NO_USE_MIDI=1 \
+                USE_OPENGL=0 \
+                USE_BGFX=0 \
                 HOSTCC='ccache gcc-11' \
                 HOSTCXX='ccache g++-11' \
                 CC='ccache aarch64-none-linux-gnu-gcc' \
