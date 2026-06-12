@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Maximize Runner Disk Space
         run: |
@@ -23,9 +23,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: mame-standalone-ccache-${{ github.run_id }}
+          key: mame-ccache-${{ github.run_id }}
           restore-keys: |
-            mame-standalone-ccache-
+            mame-ccache-
 
       - name: Build in Ubuntu 20.04 Container
         run: |
@@ -34,97 +34,56 @@ jobs:
           set -e
           
           echo '=== Setting up Build Environment ==='
-          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y software-properties-common wget python3 pkg-config \
-                  build-essential git unzip ccache coreutils make xz-utils \
-                  libgl1-mesa-dev libegl1-mesa-dev
+                  build-essential git unzip ccache coreutils make xz-utils
           
-          echo '=== Updating Host GCC Toolchain ==='
+          echo '=== Adding GCC-11 PPA for Host Compiler ==='
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y gcc-11 g++-11
           
-          echo '=== Downloading ARM GCC 11 Cross-Compiler ==='
-          wget -q https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/arm-gnu-toolchain-11.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
-          tar -xf arm-gnu-toolchain-11.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz -C /opt
-          export PATH="/opt/arm-gnu-toolchain-11.3.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH"
+          echo '=== Downloading ARM GCC 11.2 Toolchain ==='
+          wget -q https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu.tar.xz
+          tar -xf gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu.tar.xz -C /opt
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          export PATH="/sdl2/bin:$PATH"
+          export PATH="/opt/gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu/bin:/sdl2/bin:$PATH"
           export CCACHE_DIR=/root/.ccache
           ccache -M 5G
+          
+          echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
+          cd /build/mame
+          grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
+          grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
           
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
           make -j$(nproc) CC=gcc-11 CXX=g++-11
           
-          echo '=== Generating MAME Project Files ==='
-          cd /build/mame
-          
-          # Fix Git Dubious Ownership and "No Names Found" errors
-          git config --global --add safe.directory /build/mame
-          git tag "tsp-build" || true
-          
-          make generate \
-              OSD=sdl \
-              TARGETOS=linux \
-              ARCHITECTURE=_aarch64 \
-              PTR64=1 \
-              USE_X11=0 \
-              USE_WAYLAND=0 \
-              USE_OPENGL=0 \
-              USE_BGFX=0 \
-              USE_QTDEBUG=0 \
-              USE_ALSA=0 \
-              USE_PORTAUDIO=0 \
-              USE_PULSEAUDIO=0 \
-              USE_FONTCONFIG=0 \
-              USE_MIDI=0 \
-              USE_TAP=0 \
-              USE_PCAP=0
-              
-          echo '=== NUCLEAR PURGE: Eradicating x86 flags from Generated Makefiles ==='
-          find build/projects/sdl -type f \( -name "*.make" -o -name "Makefile" \) -exec sed -i 's/-m64//g' {} +
-          find build/projects/sdl -type f \( -name "*.make" -o -name "Makefile" \) -exec sed -i 's/-m32//g' {} +
-          
           echo '=== Compiling FULL MAME ==='
+          cd /build/mame
           make -j$(nproc) \
-              OSD=sdl \
-              TARGETOS=linux \
-              ARCHITECTURE=_aarch64 \
-              PTR64=1 \
-              TARGET_SUFFIX= \
-              USE_X11=0 \
-              USE_WAYLAND=0 \
-              USE_OPENGL=0 \
-              USE_BGFX=0 \
-              USE_QTDEBUG=0 \
-              USE_ALSA=0 \
-              USE_PORTAUDIO=0 \
-              USE_PULSEAUDIO=0 \
-              USE_FONTCONFIG=0 \
-              USE_MIDI=0 \
-              USE_TAP=0 \
-              USE_PCAP=0 \
-              NOWERROR=1 \
-              CROSS_BUILD=1 \
-              HOSTCC='ccache gcc-11' \
-              HOSTCXX='ccache g++-11' \
-              OVERRIDE_CC='ccache aarch64-none-linux-gnu-gcc' \
-              OVERRIDE_CXX='ccache aarch64-none-linux-gnu-g++' \
-              PYTHON_EXECUTABLE=python3 \
-              PKG_CONFIG=/bin/false \
-              EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-              EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-              LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
-              
-          aarch64-none-linux-gnu-strip /build/mame/mame* || true
+                TARGETOS=linux \
+                PTR64=1 \
+                USE_LUA=1 \
+                NOWERROR=1 \
+                CROSS_BUILD=1 \
+                HOSTCC='ccache gcc-11' \
+                HOSTCXX='ccache g++-11' \
+                CC='ccache aarch64-none-linux-gnu-gcc' \
+                CXX='ccache aarch64-none-linux-gnu-g++' \
+                PYTHON_EXECUTABLE=python3 \
+                EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
+                LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+                
+          aarch64-none-linux-gnu-strip /build/mame/mame
           EOF
 
           chmod +x build_mame.sh
@@ -139,4 +98,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame*
+          path: mame/mame
