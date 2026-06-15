@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Maximize Runner Disk Space
         run: |
@@ -69,21 +69,20 @@ jobs:
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
           make -j$(nproc) \
+                CROSS_BUILD=1 \
                 TARGETOS=linux \
                 PTR64=1 \
-                USE_LUA=1 \
-                NOWERROR=1 \
-                CROSS_BUILD=1 \
+                UNAME_M=aarch64 \
                 USE_QTDEBUG=0 \
                 USE_X11=0 \
                 USE_WAYLAND=0 \
                 NO_USE_MIDI=1 \
                 USE_OPENGL=0 \
                 USE_BGFX=0 \
-                HOSTCC='ccache gcc-11' \
-                HOSTCXX='ccache g++-11' \
-                CC='ccache aarch64-linux-gnu-gcc-11' \
-                CXX='ccache aarch64-linux-gnu-g++-11' \
+                CC='ccache gcc-11' \
+                CXX='ccache g++-11' \
+                OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11' \
+                OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11' \
                 PYTHON_EXECUTABLE=python3 \
                 EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
                 EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
