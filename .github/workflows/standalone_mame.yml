@@ -46,8 +46,6 @@ jobs:
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
-          # We install these natively, then copy the pure headers into the cross-compiler's isolated sysroot
-          # so BGFX can compile its object files without polluting the linker.
           apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev
           cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
@@ -83,7 +81,6 @@ jobs:
                 CROSS_BUILD=1 \
                 TARGETOS=linux \
                 PTR64=1 \
-                ARCHITECTURE=_arm64 \
                 USE_QTDEBUG=0 \
                 USE_X11=0 \
                 USE_WAYLAND=0 \
@@ -99,8 +96,7 @@ jobs:
                 EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
                 LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
                 
-          # Handle the generated binary name whether it outputs as 'mame' or 'mamearm64'
-          aarch64-linux-gnu-strip /build/mame/mame || aarch64-linux-gnu-strip /build/mame/mamearm64 || true
+          aarch64-linux-gnu-strip /build/mame/mame
           EOF
 
           chmod +x build_mame.sh
@@ -115,5 +111,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          # The wildcard ensures we grab the executable regardless of how the architecture flags rename it
-          path: mame/mame*
+          path: mame/mame
