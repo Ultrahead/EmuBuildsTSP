@@ -78,7 +78,6 @@ jobs:
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
           
-          # Safely export compilers so GENie applies them correctly to the linker step
           export HOSTCC='ccache gcc-11'
           export HOSTCXX='ccache g++-11'
           export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
@@ -86,7 +85,7 @@ jobs:
           export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
+          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
