@@ -77,26 +77,32 @@ jobs:
           
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
+          
+          # Safely export compilers so GENie applies them correctly to the linker step
+          export HOSTCC='ccache gcc-11'
+          export HOSTCXX='ccache g++-11'
+          export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
+          export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11'
+          export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
+          export OVERRIDE_AR='aarch64-linux-gnu-ar'
+          export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
+          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
+          export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+          
           make -j$(nproc) \
-                CROSS_BUILD=1 \
-                TARGETOS=linux \
-                PTR64=1 \
-                USE_QTDEBUG=0 \
-                USE_X11=0 \
-                USE_WAYLAND=0 \
-                NO_USE_MIDI=1 \
-                USE_OPENGL=0 \
-                USE_BGFX=0 \
-                HOSTCC='ccache gcc-11' \
-                HOSTCXX='ccache g++-11' \
-                CC='ccache aarch64-linux-gnu-gcc-11' \
-                CXX='ccache aarch64-linux-gnu-g++-11' \
-                PYTHON_EXECUTABLE=python3 \
-                EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-                EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10' \
-                LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+                CROSS_BUILD=1 TARGETOS=linux PTR64=1 \
+                USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 \
+                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
+                PYTHON_EXECUTABLE=python3 || {
+            echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
+            make CROSS_BUILD=1 TARGETOS=linux PTR64=1 \
+                USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 \
+                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
+                PYTHON_EXECUTABLE=python3
+            exit 1
+          }
                 
-          aarch64-linux-gnu-strip /build/mame/mame
+          aarch64-linux-gnu-strip /build/mame/mame* || true
           EOF
 
           chmod +x build_mame.sh
@@ -111,4 +117,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame
+          path: mame/mame*
