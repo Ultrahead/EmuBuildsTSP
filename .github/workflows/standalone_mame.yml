@@ -45,14 +45,15 @@ jobs:
           apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
-          echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
-          apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev
+          echo '=== Sideloading GL/X11/SDL_ttf Headers into ARM64 Sysroot ==='
+          apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libsdl2-ttf-dev
           cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/KHR /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
+          cp -a /usr/include/SDL2 /usr/aarch64-linux-gnu/include/ || true
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -99,7 +100,7 @@ jobs:
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
+          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
