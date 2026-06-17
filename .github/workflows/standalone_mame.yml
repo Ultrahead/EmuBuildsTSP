@@ -70,6 +70,19 @@ jobs:
           grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
           grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
           
+          echo '=== Creating C++20 Compiler Wrappers ==='
+          cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
+          #!/bin/bash
+          exec ccache aarch64-linux-gnu-g++-11 -std=c++20 "$@"
+          WRAPPER
+          chmod +x /usr/local/bin/arm64-g++-wrapper
+          
+          cat << 'WRAPPER' > /usr/local/bin/host-g++-wrapper
+          #!/bin/bash
+          exec ccache g++-11 -std=c++20 "$@"
+          WRAPPER
+          chmod +x /usr/local/bin/host-g++-wrapper
+          
           echo '=== Building GENie (Natively) ==='
           cd /build/mame/3rdparty/genie/build/gmake.linux
           make clean
@@ -78,23 +91,24 @@ jobs:
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
           
+          # Force GENie to use our custom C++20 wrappers
           export HOSTCC='ccache gcc-11'
-          export HOSTCXX='ccache g++-11'
+          export HOSTCXX='host-g++-wrapper'
           export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
-          export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11'
-          export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
+          export OVERRIDE_CXX='arm64-g++-wrapper'
+          export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
-                CROSS_BUILD=1 TARGETOS=linux PTR64=1 \
+                CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
                 USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 \
                 NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                 PYTHON_EXECUTABLE=python3 || {
             echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
-            make CROSS_BUILD=1 TARGETOS=linux PTR64=1 \
+            make CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 \
                 USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 \
                 NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                 PYTHON_EXECUTABLE=python3
