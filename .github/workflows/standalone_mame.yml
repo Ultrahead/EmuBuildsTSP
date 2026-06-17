@@ -45,7 +45,8 @@ jobs:
           apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
-          echo '=== Sideloading GL/X11/SDL_ttf Headers into ARM64 Sysroot ==='
+          echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
+          # We grab the TTF dev package here, but we will strictly isolate its header below.
           apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libsdl2-ttf-dev
           cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
@@ -53,12 +54,18 @@ jobs:
           cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/SDL2 /usr/aarch64-linux-gnu/include/ || true
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          
+          echo '=== Patching Missing SDL_ttf Header ==='
+          # Surgically inject ONLY the SDL_ttf header into the custom TSP blob's include path.
+          # The nested folder handles arbitrary <SDL2/SDL_ttf.h> inclusion calls safely.
+          cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
+          mkdir -p /sdl2/include/SDL2/SDL2
+          cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/SDL2/ || true
           
           export PATH="/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
