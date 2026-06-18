@@ -57,10 +57,11 @@ jobs:
           echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
           # We download the packages directly to bypass the apt registry, preventing host SDL2 pollution.
           mkdir -p /tmp/ghost_deps
+          chmod 777 /tmp/ghost_deps
           cd /tmp/ghost_deps
           apt-get download libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
           mkdir -p /tmp/extracted
-          for deb in *.deb; do dpkg -x "$deb" /tmp/extracted; ; done
+          for deb in *.deb; do dpkg -x "$deb" /tmp/extracted; done
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
