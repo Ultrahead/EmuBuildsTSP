@@ -53,18 +53,20 @@ jobs:
           cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/fontconfig /usr/aarch64-linux-gnu/include/ || true
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          echo '=== Patching Missing SDL_ttf Header ==='
+          echo '=== Patching Missing Headers ==='
           # Surgically inject ONLY the SDL_ttf header into the custom TSP blob's include path.
           cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
           mkdir -p /sdl2/include/SDL2/SDL2
           cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/SDL2/ || true
+          
+          # Surgically inject the fontconfig headers to bypass unconditional includes
+          cp -a /usr/include/fontconfig /sdl2/include/ || true
           
           export PATH="/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
@@ -105,8 +107,10 @@ jobs:
           export OVERRIDE_CXX='arm64-g++-wrapper'
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
-          export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+          
+          # Inject preprocessor definitions to forcibly suppress SDL's X11/Wayland behavior
+          export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
+          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
