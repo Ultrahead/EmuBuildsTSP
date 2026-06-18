@@ -45,8 +45,8 @@ jobs:
           apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
-          echo '=== Sideloading Ghost Dependency Headers into ARM64 Sysroot ==='
-          apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libsdl2-ttf-dev libfontconfig1-dev
+          echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
+          apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev
           cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/KHR /usr/aarch64-linux-gnu/include/ || true
@@ -54,22 +54,31 @@ jobs:
           cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
           
+          echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
+          # We download the packages directly to bypass the apt registry, preventing host SDL2 pollution.
+          mkdir -p /tmp/ghost_deps
+          cd /tmp/ghost_deps
+          apt-get download libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
+          mkdir -p /tmp/extracted
+          for deb in *.deb; do dpkg -x "$deb" /tmp/extracted; ; done
+          
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          echo '=== Patching Missing Headers ==='
-          # Surgically inject ONLY the SDL_ttf header into the custom TSP blob's include path.
-          cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
-          mkdir -p /sdl2/include/SDL2/SDL2
-          cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/SDL2/ || true
+          echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
+          # We push the extracted pure headers directly into the cross-compiler and our custom sandbox
+          cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
+          cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
           
-          # Surgically inject the fontconfig headers to bypass unconditional includes
-          cp -a /usr/include/fontconfig /sdl2/include/ || true
+          # Explicitly route SDL_ttf.h so MAME's <SDL2/SDL_ttf.h> calls work flawlessly
+          mkdir -p /sdl2/include/SDL2
+          cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
           
           export PATH="/sdl2/bin:$PATH"
-          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          # The absolute firewall: pkg-config will ONLY look at your custom blob
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
           export CCACHE_DIR=/root/.ccache
           ccache -M 5G
@@ -100,7 +109,6 @@ jobs:
           echo '=== Compiling FULL MAME ==='
           cd /build/mame
           
-          # Force GENie to use our custom C++20 wrappers
           export HOSTCC='ccache gcc-11'
           export HOSTCXX='host-g++-wrapper'
           export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
@@ -108,9 +116,9 @@ jobs:
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           
-          # Inject preprocessor definitions to forcibly suppress SDL's X11/Wayland behavior
-          export EXTRACFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
-          export EXTRACXXFLAGS='-I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
+          # Force the compiler to scan our perfectly isolated /sdl2 sandbox first
+          export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
+          export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
@@ -126,6 +134,10 @@ jobs:
             exit 1
           }
                 
+          # Prove the binary is linked correctly and strictly for ARM64/TSP
+          echo '=== Library Dependencies for Final Binary ==='
+          aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
+          
           aarch64-linux-gnu-strip /build/mame/mame* || true
           EOF
 
