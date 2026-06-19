@@ -55,13 +55,22 @@ jobs:
           cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
           
           echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
-          # We download the packages directly to bypass the apt registry, preventing host SDL2 pollution.
           mkdir -p /tmp/ghost_deps
-          chmod 777 /tmp/ghost_deps
+          chown _apt /tmp/ghost_deps || true
           cd /tmp/ghost_deps
-          apt-get download libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
+          
+          # Download both dummy and real package names to guarantee we hit the headers
+          apt-get download libsdl2-ttf-dev || true
+          apt-get download libfontconfig-dev || true
+          apt-get download libfontconfig1-dev || true
+          apt-get download libfreetype-dev || true
+          apt-get download libfreetype6-dev || true
+          
           mkdir -p /tmp/extracted
-          for deb in *.deb; do dpkg -x "$deb" /tmp/extracted; done
+          for deb in *.deb; do
+            [ -f "$deb" ] || continue
+            dpkg -x "$deb" /tmp/extracted
+          done
           
           echo '=== Deploying Custom SDL2 ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -72,6 +81,12 @@ jobs:
           # We push the extracted pure headers directly into the cross-compiler and our custom sandbox
           cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
           cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
+          
+          # Flatten freetype2 so <ft2build.h> resolves directly if requested
+          if [ -d /tmp/extracted/usr/include/freetype2 ]; then
+            cp -a /tmp/extracted/usr/include/freetype2/* /usr/aarch64-linux-gnu/include/ || true
+            cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
+          fi
           
           # Explicitly route SDL_ttf.h so MAME's <SDL2/SDL_ttf.h> calls work flawlessly
           mkdir -p /sdl2/include/SDL2
