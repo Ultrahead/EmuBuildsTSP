@@ -133,9 +133,9 @@ jobs:
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           
-          # Force the compiler to scan our perfectly isolated /sdl2 sandbox first
-          export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+          # Force the compiler to scan our perfectly isolated sandbox, and forcefully suppress X11/Wayland macros
+          export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
+          export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20 -DSDL_VIDEO_DRIVER_X11=0 -DSDL_VIDEO_DRIVER_WAYLAND=0'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           # Added USE_XINPUT=0 to force MAME to skip the X11 Input module entirely
