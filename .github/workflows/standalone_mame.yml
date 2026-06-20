@@ -96,7 +96,7 @@ jobs:
           echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
           echo "void hollow_shell(){}" > /tmp/hollow.c
           aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
-          for ghost in X11 Xinerama Xext Xi; do
+          for ghost in GL X11 Xinerama Xext Xi; do
             aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
           done
           
