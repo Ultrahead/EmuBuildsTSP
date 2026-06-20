@@ -76,18 +76,27 @@ jobs:
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          echo '=== Providing ARM64 SDL2_ttf Shared Library for the Linker ==='
+          echo '=== Providing ARM64 Shared Libraries for the TTF Linker Chain ==='
           wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/freetype/libfreetype6_2.10.4+dfsg-1build1_arm64.deb -O /tmp/libfreetype6.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu3_arm64.deb -O /tmp/libfontconfig1.deb
+          
           dpkg -x /tmp/libsdl2-ttf.deb /tmp/sdl_ttf_lib
+          dpkg -x /tmp/libfreetype6.deb /tmp/freetype_lib
+          dpkg -x /tmp/libfontconfig1.deb /tmp/fontconfig_lib
+          
           cp -a /tmp/sdl_ttf_lib/usr/lib/aarch64-linux-gnu/libSDL2_ttf*.so* /sdl2/lib/
+          cp -a /tmp/freetype_lib/usr/lib/aarch64-linux-gnu/libfreetype*.so* /sdl2/lib/
+          cp -a /tmp/fontconfig_lib/usr/lib/aarch64-linux-gnu/libfontconfig*.so* /sdl2/lib/
+          
           ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so
+          ln -sf /sdl2/lib/libfreetype.so.6 /sdl2/lib/libfreetype.so
+          ln -sf /sdl2/lib/libfontconfig.so.1 /sdl2/lib/libfontconfig.so
           
           echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
-          # We create an empty object file and wrap it in static archives mimicking the missing desktop libraries.
-          # Because MAME's source is lobotomized, no symbols are requested, and the linker safely ignores them.
           echo "void hollow_shell(){}" > /tmp/hollow.c
           aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
-          for ghost in GL X11 Xinerama Xext Xi; do
+          for ghost in X11 Xinerama Xext Xi; do
             aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
           done
           
@@ -121,6 +130,9 @@ jobs:
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
           
+          # Force MAME's OpenGL module to completely short-circuit to prevent glBegin/glBindTexture linker errors
+          sed -i '1i #undef USE_OPENGL\n#define USE_OPENGL 0\n' src/osd/modules/render/drawogl.cpp || true
+          
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
           #!/bin/bash
@@ -151,7 +163,9 @@ jobs:
           
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
-          export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+          
+          # Added explicit -rpath so the linker can seamlessly traverse the SDL2_ttf -> freetype dependency chain
+          export LDFLAGS='-L/sdl2/lib -Wl,-rpath,/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
                 CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
