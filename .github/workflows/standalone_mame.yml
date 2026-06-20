@@ -59,7 +59,6 @@ jobs:
           chown _apt /tmp/ghost_deps || true
           cd /tmp/ghost_deps
           
-          # Download both dummy and real package names to guarantee we hit the headers
           apt-get download libsdl2-ttf-dev || true
           apt-get download libfontconfig-dev || true
           apt-get download libfontconfig1-dev || true
@@ -77,8 +76,19 @@ jobs:
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
+          echo '=== Providing ARM64 SDL2_ttf Shared Library for the Linker ==='
+          # Download the exact ARM64 binary shared library from the static Ubuntu 21.04 archive
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
+          dpkg -x /tmp/libsdl2-ttf.deb /tmp/sdl_ttf_lib
+          cp -a /tmp/sdl_ttf_lib/usr/lib/aarch64-linux-gnu/libSDL2_ttf*.so* /sdl2/lib/
+          # The linker specifically looks for the exact string "-lSDL2_ttf", so we create a direct symlink
+          ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so
+          
+          echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
+          # We forcefully scrub the ghost desktop libraries out of the custom sdl2 configs
+          sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
+          
           echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
-          # We push the extracted pure headers directly into the cross-compiler and our custom sandbox
           cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
           cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
           
@@ -102,8 +112,6 @@ jobs:
           grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
           
           echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
-          # We manually overwrite MAME's internal X11 and Wayland triggers across the entire C++ codebase.
-          # This guarantees the compiler completely ignores the window manager code blocks.
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
           
@@ -135,7 +143,6 @@ jobs:
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           
-          # Clean compiler flags pointed exclusively at the TSP custom blob
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
@@ -153,7 +160,6 @@ jobs:
             exit 1
           }
                 
-          # Prove the binary is linked correctly and strictly for ARM64/TSP
           echo '=== Library Dependencies for Final Binary ==='
           aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
           
