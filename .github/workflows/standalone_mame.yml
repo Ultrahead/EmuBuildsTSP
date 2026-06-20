@@ -46,7 +46,6 @@ jobs:
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
           
           echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
-          # Added libxi-dev to guarantee X11/extensions/XInput.h is present for syntax checks
           apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev
           cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
           cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
@@ -83,18 +82,15 @@ jobs:
           cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
           cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
           
-          # Flatten freetype2 so <ft2build.h> resolves directly if requested
           if [ -d /tmp/extracted/usr/include/freetype2 ]; then
             cp -a /tmp/extracted/usr/include/freetype2/* /usr/aarch64-linux-gnu/include/ || true
             cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
           fi
           
-          # Explicitly route SDL_ttf.h so MAME's <SDL2/SDL_ttf.h> calls work flawlessly
           mkdir -p /sdl2/include/SDL2
           cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
           
           export PATH="/sdl2/bin:$PATH"
-          # The absolute firewall: pkg-config will ONLY look at your custom blob
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
           export CCACHE_DIR=/root/.ccache
@@ -104,6 +100,12 @@ jobs:
           cd /build/mame
           grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
           grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
+          
+          echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
+          # We manually overwrite MAME's internal X11 and Wayland triggers across the entire C++ codebase.
+          # This guarantees the compiler completely ignores the window manager code blocks.
+          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
+          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
           
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
@@ -133,12 +135,11 @@ jobs:
           export OVERRIDE_LD='arm64-g++-wrapper'
           export OVERRIDE_AR='aarch64-linux-gnu-ar'
           
-          # Clean compiler flags WITHOUT toxic -D overrides
+          # Clean compiler flags pointed exclusively at the TSP custom blob
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
-          # Added USE_XINPUT=0 to force MAME to skip the X11 Input module entirely
           make -j$(nproc) \
                 CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
                 USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
