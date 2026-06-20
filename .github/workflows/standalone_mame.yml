@@ -77,15 +77,21 @@ jobs:
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
           echo '=== Providing ARM64 SDL2_ttf Shared Library for the Linker ==='
-          # Download the exact ARM64 binary shared library from the static Ubuntu 21.04 archive
           wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
           dpkg -x /tmp/libsdl2-ttf.deb /tmp/sdl_ttf_lib
           cp -a /tmp/sdl_ttf_lib/usr/lib/aarch64-linux-gnu/libSDL2_ttf*.so* /sdl2/lib/
-          # The linker specifically looks for the exact string "-lSDL2_ttf", so we create a direct symlink
           ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so
           
+          echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
+          # We create an empty object file and wrap it in static archives mimicking the missing desktop libraries.
+          # Because MAME's source is lobotomized, no symbols are requested, and the linker safely ignores them.
+          echo "void hollow_shell(){}" > /tmp/hollow.c
+          aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
+          for ghost in GL X11 Xinerama Xext Xi; do
+            aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
+          done
+          
           echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
-          # We forcefully scrub the ghost desktop libraries out of the custom sdl2 configs
           sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
           
           echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
