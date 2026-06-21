@@ -33,18 +33,8 @@ jobs:
           #!/bin/bash
           set -e
           
-          echo '=== Configuring APT for Native (amd64) and Cross (arm64) Repositories ==='
-          dpkg --add-architecture arm64
-          
-          # Strictly routing architectures to their respective Ubuntu domains to avoid 404s
-          cat << 'APT_EOF' > /etc/apt/sources.list
-          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute main restricted universe multiverse
-          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-updates main restricted universe multiverse
-          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-security main restricted universe multiverse
-          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute main restricted universe multiverse
-          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-updates main restricted universe multiverse
-          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-security main restricted universe multiverse
-          APT_EOF
+          echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
+          sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
           
           echo '=== Setting up Build Environment ==='
           apt-get update
@@ -86,28 +76,26 @@ jobs:
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          echo '=== Downloading ARM64 Shared Libraries via APT for the TTF Linker Chain ==='
-          mkdir -p /tmp/arm64_libs
-          chown _apt /tmp/arm64_libs || true
-          cd /tmp/arm64_libs
-          
-          # This will now successfully pull from the ubuntu-ports archive
-          apt-get download libsdl2-ttf-2.0-0:arm64 libfreetype6:arm64 libfontconfig1:arm64 libpng16-16:arm64 zlib1g:arm64 libbrotli1:arm64 libexpat1:arm64 libuuid1:arm64
+          echo '=== Downloading ARM64 Shared Libraries manually for the TTF Linker Chain ==='
+          # We download the exact binaries directly from the old-releases pool structure
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/freetype/libfreetype6_2.10.4+dfsg-1build1_arm64.deb -O /tmp/libfreetype6.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu3_arm64.deb -O /tmp/libfontconfig1.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/libp/libpng1.6/libpng16-16_1.6.37-3build5_arm64.deb -O /tmp/libpng16.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu4_arm64.deb -O /tmp/zlib1g.deb
+          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/b/brotli/libbrotli1_1.0.9-2build1_arm64.deb -O /tmp/libbrotli1.deb
           
           mkdir -p /tmp/libs
-          for deb in *.deb; do
+          for deb in /tmp/*.deb; do 
+            [ -f "$deb" ] || continue
             dpkg -x "$deb" /tmp/libs
           done
           
+          # Move all extracted binaries directly into our SDL sandbox
           cp -a /tmp/libs/usr/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           cp -a /tmp/libs/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           
-          for so in /sdl2/lib/*.so.*; do
-            base=$(echo "$so" | sed -E 's/(\.so)\.[0-9.]+/\1/')
-            ln -sf "$so" "$base" || true
-          done
-          
-          # Explicitly ensuring the exact linker strings are satisfied
+          # Create strict base symlinks for the linker
           ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so || true
           ln -sf /sdl2/lib/libfreetype.so.6 /sdl2/lib/libfreetype.so || true
           ln -sf /sdl2/lib/libfontconfig.so.1 /sdl2/lib/libfontconfig.so || true
@@ -187,6 +175,8 @@ jobs:
           
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+          
+          # Added explicit -rpath so the linker can seamlessly traverse the dependency chain
           export LDFLAGS='-L/sdl2/lib -Wl,-rpath,/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
