@@ -33,16 +33,17 @@ jobs:
           #!/bin/bash
           set -e
           
-          echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
-          sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
-          
-          echo '=== Configuring APT for Native and ARM64 Packages ==='
+          echo '=== Configuring APT for Native (amd64) and Cross (arm64) Repositories ==='
           dpkg --add-architecture arm64
           
+          # Strictly routing architectures to their respective Ubuntu domains to avoid 404s
           cat << 'APT_EOF' > /etc/apt/sources.list
-          deb [arch=amd64,arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute main restricted universe multiverse
-          deb [arch=amd64,arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-updates main restricted universe multiverse
-          deb [arch=amd64,arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-security main restricted universe multiverse
+          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute main restricted universe multiverse
+          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-updates main restricted universe multiverse
+          deb [arch=amd64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-security main restricted universe multiverse
+          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute main restricted universe multiverse
+          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-updates main restricted universe multiverse
+          deb [arch=arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-security main restricted universe multiverse
           APT_EOF
           
           echo '=== Setting up Build Environment ==='
@@ -90,11 +91,11 @@ jobs:
           chown _apt /tmp/arm64_libs || true
           cd /tmp/arm64_libs
           
-          apt-get download libsdl2-ttf-2.0-0:arm64 libfreetype6:arm64 libfontconfig1:arm64 libpng16-16:arm64 zlib1g:arm64 libbrotli1:arm64 libexpat1:arm64 libuuid1:arm64 || true
+          # This will now successfully pull from the ubuntu-ports archive
+          apt-get download libsdl2-ttf-2.0-0:arm64 libfreetype6:arm64 libfontconfig1:arm64 libpng16-16:arm64 zlib1g:arm64 libbrotli1:arm64 libexpat1:arm64 libuuid1:arm64
           
           mkdir -p /tmp/libs
           for deb in *.deb; do
-            [ -f "$deb" ] || continue
             dpkg -x "$deb" /tmp/libs
           done
           
@@ -105,6 +106,13 @@ jobs:
             base=$(echo "$so" | sed -E 's/(\.so)\.[0-9.]+/\1/')
             ln -sf "$so" "$base" || true
           done
+          
+          # Explicitly ensuring the exact linker strings are satisfied
+          ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so || true
+          ln -sf /sdl2/lib/libfreetype.so.6 /sdl2/lib/libfreetype.so || true
+          ln -sf /sdl2/lib/libfontconfig.so.1 /sdl2/lib/libfontconfig.so || true
+          ln -sf /sdl2/lib/libpng16.so.16 /sdl2/lib/libpng16.so || true
+          ln -sf /sdl2/lib/libz.so.1 /sdl2/lib/libz.so || true
           
           echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
           echo "void hollow_shell(){}" > /tmp/hollow.c
