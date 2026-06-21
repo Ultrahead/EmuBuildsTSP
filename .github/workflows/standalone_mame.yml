@@ -33,12 +33,12 @@ jobs:
           #!/bin/bash
           set -e
           
+          echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
+          sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+          
           echo '=== Configuring APT for Native and ARM64 Packages ==='
-          # Register ARM64 architecture natively in the package manager
           dpkg --add-architecture arm64
           
-          # Overwrite sources.list to explicitly pull BOTH architectures from old-releases
-          # trusted=yes ensures we don't fail due to expired GPG signatures on EOL releases
           cat << 'APT_EOF' > /etc/apt/sources.list
           deb [arch=amd64,arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute main restricted universe multiverse
           deb [arch=amd64,arm64 trusted=yes] http://old-releases.ubuntu.com/ubuntu/ hirsute-updates main restricted universe multiverse
@@ -90,7 +90,6 @@ jobs:
           chown _apt /tmp/arm64_libs || true
           cd /tmp/arm64_libs
           
-          # Now that apt-get update correctly fetched arm64 metadata, this will succeed natively
           apt-get download libsdl2-ttf-2.0-0:arm64 libfreetype6:arm64 libfontconfig1:arm64 libpng16-16:arm64 zlib1g:arm64 libbrotli1:arm64 libexpat1:arm64 libuuid1:arm64 || true
           
           mkdir -p /tmp/libs
@@ -99,11 +98,9 @@ jobs:
             dpkg -x "$deb" /tmp/libs
           done
           
-          # Move all downloaded binaries into our SDL sandbox
           cp -a /tmp/libs/usr/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           cp -a /tmp/libs/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           
-          # Auto-create .so symlinks for all downloaded libraries so the linker finds them
           for so in /sdl2/lib/*.so.*; do
             base=$(echo "$so" | sed -E 's/(\.so)\.[0-9.]+/\1/')
             ln -sf "$so" "$base" || true
@@ -146,13 +143,11 @@ jobs:
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
           
-          echo '=== SOURCE CODE LOBOTOMY: Completely Short-Circuiting OpenGL and X11 Modules ==='
-          # We forcefully gut the OpenGL renderer and X11 input files so the compiler generates completely dead objects.
-          # This prevents the linker from ever searching for GL or X11 functions.
-          sed -i '1i #undef USE_OPENGL\n#define USE_OPENGL 0\n' src/osd/modules/render/drawogl.cpp || true
-          sed -i '1i #undef USE_OPENGL\n#define USE_OPENGL 0\n' src/osd/modules/opengl/gl_shader_mgr.cpp || true
-          sed -i '1i #undef USE_OPENGL\n#define USE_OPENGL 0\n' src/osd/modules/opengl/gl_shader_tool.cpp || true
-          sed -i '1i #undef USE_X11\n#define USE_X11 0\n' src/osd/modules/input/input_x11.cpp || true
+          echo '=== SOURCE CODE LOBOTOMY: Erasing OpenGL and X11 Input Modules ==='
+          echo '#include "osdcore.h"' > src/osd/modules/render/drawogl.cpp
+          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_mgr.cpp
+          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_tool.cpp
+          echo '#include "osdcore.h"' > src/osd/modules/input/input_x11.cpp
           
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
@@ -184,8 +179,6 @@ jobs:
           
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
-          
-          # Explicit -rpath guarantees the Freetype dependency chain resolves locally in the sandbox
           export LDFLAGS='-L/sdl2/lib -Wl,-rpath,/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
