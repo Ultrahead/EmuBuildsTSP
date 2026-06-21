@@ -36,8 +36,20 @@ jobs:
           echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
           sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
           
+          echo '=== Configuring APT for Multiarch ARM64 Binary Extraction ==='
+          dpkg --add-architecture arm64
+          # Restrict existing repos to amd64 to prevent architecture conflicts
+          sed -i -e 's/^deb /deb [arch=amd64] /g' /etc/apt/sources.list
+          
+          # Add the official arm64 ports repository
+          cat << 'APT_EOF' > /etc/apt/sources.list.d/arm64.list
+          deb [arch=arm64] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute main universe
+          deb [arch=arm64] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-updates main universe
+          deb [arch=arm64] http://old-releases.ubuntu.com/ubuntu-ports/ hirsute-security main universe
+          APT_EOF
+          
           echo '=== Setting up Build Environment ==='
-          apt-get update
+          apt-get update || true
           apt-get install -y software-properties-common wget python3 pkg-config \
                   build-essential git unzip ccache coreutils make xz-utils
           
@@ -76,26 +88,35 @@ jobs:
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
-          echo '=== Providing ARM64 Shared Libraries for the TTF Linker Chain ==='
-          # Download all the required libraries to satisfy the Freetype -> PNG -> Brotli -> Zlib chain
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/freetype/libfreetype6_2.10.4+dfsg-1build1_arm64.deb -O /tmp/libfreetype6.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu3_arm64.deb -O /tmp/libfontconfig1.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/libp/libpng1.6/libpng16-16_1.6.37-3build5_arm64.deb -O /tmp/libpng16.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu4_arm64.deb -O /tmp/zlib1g.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/b/brotli/libbrotli1_1.0.9-2build1_arm64.deb -O /tmp/libbrotli1.deb
+          echo '=== Downloading ARM64 Shared Libraries via APT for the TTF Linker Chain ==='
+          mkdir -p /tmp/arm64_libs
+          chown _apt /tmp/arm64_libs || true
+          cd /tmp/arm64_libs
           
-          for deb in /tmp/*.deb; do dpkg -x "$deb" /tmp/libs; done
+          # Using apt-get download fetches the exact ARM64 binaries without risking a URL 404
+          apt-get download libsdl2-ttf-2.0-0:arm64 libfreetype6:arm64 libfontconfig1:arm64 libpng16-16:arm64 zlib1g:arm64 libbrotli1:arm64
+          
+          mkdir -p /tmp/libs
+          for deb in *.deb; do
+            [ -f "$deb" ] || continue
+            dpkg -x "$deb" /tmp/libs
+          done
           
           cp -a /tmp/libs/usr/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           cp -a /tmp/libs/lib/aarch64-linux-gnu/*.so* /sdl2/lib/ || true
           
-          # Fix up the critical symlinks for the linker
           ln -sf /sdl2/lib/libSDL2_ttf-2.0.so.0 /sdl2/lib/libSDL2_ttf.so
           ln -sf /sdl2/lib/libfreetype.so.6 /sdl2/lib/libfreetype.so
           ln -sf /sdl2/lib/libfontconfig.so.1 /sdl2/lib/libfontconfig.so
           ln -sf /sdl2/lib/libpng16.so.16 /sdl2/lib/libpng16.so
           ln -sf /sdl2/lib/libz.so.1 /sdl2/lib/libz.so
+          
+          echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
+          echo "void hollow_shell(){}" > /tmp/hollow.c
+          aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
+          for ghost in GL X11 Xinerama Xext Xi; do
+            aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
+          done
           
           echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
           sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
@@ -123,14 +144,15 @@ jobs:
           grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
           grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
           
-          echo '=== SOURCE CODE LOBOTOMY: Completely Erasing OpenGL and X11 Modules ==='
-          # We forcefully gut the OpenGL renderer and X11 input files so the compiler generates empty object files.
-          # This prevents the linker from ever searching for GL or X11 functions.
-          echo '#include "osdcore.h"' > src/osd/modules/render/drawogl.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/input/input_x11.cpp
-          echo '#include "osdcore.h"' > src/osd/sdl/window.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_mgr.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_tool.cpp
+          echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
+          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
+          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
+          
+          echo '=== SOURCE CODE LOBOTOMY: Disabling OpenGL Module Safely ==='
+          # We purposefully corrupt the macro so the compiler evaluates `#if USE_OPENGL` as false
+          sed -i 's/USE_OPENGL/IGNORE_OPENGL/g' src/osd/modules/render/drawogl.cpp || true
+          sed -i 's/USE_OPENGL/IGNORE_OPENGL/g' src/osd/modules/opengl/gl_shader_mgr.cpp || true
+          sed -i 's/USE_OPENGL/IGNORE_OPENGL/g' src/osd/modules/opengl/gl_shader_tool.cpp || true
           
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
@@ -162,8 +184,6 @@ jobs:
           
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
-          
-          # Explicit -rpath guarantees the Freetype dependency chain resolves locally in the sandbox
           export LDFLAGS='-L/sdl2/lib -Wl,-rpath,/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
