@@ -127,11 +127,31 @@ jobs:
           find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_FONTCONFIG/IGNORE_FONTCONFIG/g' || true
           
           echo '=== SOURCE CODE LOBOTOMY: Erasing OpenGL, X11 Input, and Font Modules ==='
-          echo '#include "osdcore.h"' > src/osd/modules/render/drawogl.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_mgr.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_tool.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/input/input_x11.cpp
-          echo '#include "osdcore.h"' > src/osd/modules/font/font_sdl.cpp
+          
+          cat << 'STUB' > src/osd/modules/render/drawogl.cpp
+          #include "osdcore.h"
+          extern const char RENDERER_OPENGL[] = "opengl";
+          STUB
+          
+          cat << 'STUB' > src/osd/modules/opengl/gl_shader_mgr.cpp
+          #include "osdcore.h"
+          STUB
+          
+          cat << 'STUB' > src/osd/modules/opengl/gl_shader_tool.cpp
+          #include "osdcore.h"
+          STUB
+          
+          cat << 'STUB' > src/osd/modules/input/input_x11.cpp
+          #include "osdcore.h"
+          extern const char KEYBOARD_X11[] = "x11";
+          extern const char MOUSE_X11[] = "x11";
+          extern const char LIGHTGUN_X11[] = "x11";
+          STUB
+          
+          cat << 'STUB' > src/osd/modules/font/font_sdl.cpp
+          #include "osdcore.h"
+          extern const char FONT_SDL[] = "sdl";
+          STUB
           
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
@@ -164,7 +184,6 @@ jobs:
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           
-          # Dropped the rpath dependency traversals since we are using hollow archives now
           export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
