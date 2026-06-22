@@ -153,6 +153,13 @@ jobs:
           extern const char FONT_SDL[] = "sdl";
           STUB
           
+          echo '=== SOURCE CODE LOBOTOMY: Patching MAME master PowerPC Bug ==='
+          # MAME master currently has a missing implementation for the PPC601 CPU. We inject it.
+          cat << 'PPC_PATCH' >> src/devices/cpu/powerpc/ppccom.cpp
+          
+          void ppc601_device::decrementer_int_callback(int state) {}
+          PPC_PATCH
+          
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
           #!/bin/bash
