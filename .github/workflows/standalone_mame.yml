@@ -77,13 +77,13 @@ jobs:
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
           echo '=== Downloading ARM64 Shared Libraries manually for the TTF Linker Chain ==='
-          # We download the exact binaries directly from the old-releases pool structure
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/freetype/libfreetype6_2.10.4+dfsg-1build1_arm64.deb -O /tmp/libfreetype6.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu3_arm64.deb -O /tmp/libfontconfig1.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/libp/libpng1.6/libpng16-16_1.6.37-3build5_arm64.deb -O /tmp/libpng16.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu4_arm64.deb -O /tmp/zlib1g.deb
-          wget -q http://old-releases.ubuntu.com/ubuntu/pool/main/b/brotli/libbrotli1_1.0.9-2build1_arm64.deb -O /tmp/libbrotli1.deb
+          # We download the exact binaries directly from the old-releases ubuntu-ports pool structure!
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/universe/libs/libsdl2-ttf/libsdl2-ttf-2.0-0_2.0.15+dfsg1-1_arm64.deb -O /tmp/libsdl2-ttf.deb
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/main/f/freetype/libfreetype6_2.10.4+dfsg-1build1_arm64.deb -O /tmp/libfreetype6.deb
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu3_arm64.deb -O /tmp/libfontconfig1.deb
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/main/libp/libpng1.6/libpng16-16_1.6.37-3build5_arm64.deb -O /tmp/libpng16.deb
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu4_arm64.deb -O /tmp/zlib1g.deb
+          wget -nv http://old-releases.ubuntu.com/ubuntu-ports/pool/main/b/brotli/libbrotli1_1.0.9-2build1_arm64.deb -O /tmp/libbrotli1.deb
           
           mkdir -p /tmp/libs
           for deb in /tmp/*.deb; do 
@@ -175,8 +175,6 @@ jobs:
           
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
-          
-          # Added explicit -rpath so the linker can seamlessly traverse the dependency chain
           export LDFLAGS='-L/sdl2/lib -Wl,-rpath,/sdl2/lib -Wl,--hash-style=both'
           
           make -j$(nproc) \
