@@ -153,13 +153,6 @@ jobs:
           extern const char FONT_SDL[] = "sdl";
           STUB
           
-          echo '=== SOURCE CODE LOBOTOMY: Patching MAME master PowerPC Bug ==='
-          # MAME master currently has a missing implementation for the PPC601 CPU. We inject it.
-          cat << 'PPC_PATCH' >> src/devices/cpu/powerpc/ppccom.cpp
-          
-          void ppc601_device::decrementer_int_callback(int state) {}
-          PPC_PATCH
-          
           echo '=== Creating C++20 Compiler Wrappers ==='
           cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
           #!/bin/bash
@@ -191,7 +184,8 @@ jobs:
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           
-          export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both'
+          # The defsym flag elegantly bypasses the PowerPC 601 paradox by mapping the exact mangled symbol to our hollow stub
+          export LDFLAGS='-L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
           
           make -j$(nproc) \
                 CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
