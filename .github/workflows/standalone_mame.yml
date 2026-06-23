@@ -26,6 +26,7 @@ jobs:
           key: mame-ccache-${{ github.run_id }}
           restore-keys: |
             mame-ccache-
+          save-always: true
 
       - name: Build in Ubuntu 21.04 Container
         env:
@@ -112,8 +113,11 @@ jobs:
             export PATH="/sdl2/bin:$PATH"
             export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
             export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
+            
             export CCACHE_DIR=/root/.ccache
             ccache -M 5G
+            echo '=== Initial CCache Statistics ==='
+            ccache -s
             
             echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
             cd /build/mame
@@ -148,7 +152,6 @@ jobs:
             echo '=== Compiling FULL MAME ==='
             cd /build/mame
             
-            # Using direct compiler paths to preserve the ccache signature
             export HOSTCC='ccache gcc-11'
             export HOSTCXX='ccache g++-11'
             export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
@@ -156,11 +159,9 @@ jobs:
             export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
             export OVERRIDE_AR='aarch64-linux-gnu-ar'
             
-            # Injecting -std=c++20 directly into EXTRACXXFLAGS instead of a wrapper
             export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
             export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
-            # -fuse-ld=lld handles the 128MB branch limit, --defsym handles the bleeding-edge PowerPC bug
             export LDFLAGS='-fuse-ld=lld -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
@@ -172,14 +173,22 @@ jobs:
               make CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
-                  PYTHON_EXECUTABLE=python3
-              exit 1
+                  PYTHON_EXECUTABLE=python3 || {
+                    echo '=== Final CCache Statistics (Failure) ==='
+                    ccache -s
+                    chmod -R 777 /root/.ccache || true
+                    exit 1
+              }
             }
                   
             echo '=== Library Dependencies for Final Binary ==='
             aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
             
             aarch64-linux-gnu-strip /build/mame/mame* || true
+            
+            echo '=== Final CCache Statistics (Success) ==='
+            ccache -s
+            chmod -R 777 /root/.ccache || true
 
         run: |
           echo "$BUILD_SCRIPT" > build_mame.sh
