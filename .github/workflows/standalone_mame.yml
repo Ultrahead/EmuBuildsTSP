@@ -159,10 +159,10 @@ jobs:
             export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
             export OVERRIDE_AR='aarch64-linux-gnu-ar'
             
-            export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
-            export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+            # Added -mstrict-align to prevent hardware SIGBUS crashes on the ARM64 processor
+            export EXTRACFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
+            export EXTRACXXFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
-            # Pack the C++ Standard Library and GCC Library directly into the binary
             export LDFLAGS='-static-libstdc++ -static-libgcc -fuse-ld=lld -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
