@@ -140,15 +140,6 @@ jobs:
             echo '#include "osdcore.h"' > src/osd/modules/font/font_sdl.cpp
             echo 'extern const char FONT_SDL[] = "sdl";' >> src/osd/modules/font/font_sdl.cpp
             
-            echo '=== Creating C++20 Compiler Wrappers ==='
-            echo '#!/bin/bash' > /usr/local/bin/arm64-g++-wrapper
-            echo 'exec ccache aarch64-linux-gnu-g++-11 -std=c++20 "$@"' >> /usr/local/bin/arm64-g++-wrapper
-            chmod +x /usr/local/bin/arm64-g++-wrapper
-            
-            echo '#!/bin/bash' > /usr/local/bin/host-g++-wrapper
-            echo 'exec ccache g++-11 -std=c++20 "$@"' >> /usr/local/bin/host-g++-wrapper
-            chmod +x /usr/local/bin/host-g++-wrapper
-            
             echo '=== Building GENie (Natively) ==='
             cd /build/mame/3rdparty/genie/build/gmake.linux
             make clean
@@ -157,13 +148,15 @@ jobs:
             echo '=== Compiling FULL MAME ==='
             cd /build/mame
             
+            # Using direct compiler paths to preserve the ccache signature
             export HOSTCC='ccache gcc-11'
-            export HOSTCXX='host-g++-wrapper'
+            export HOSTCXX='ccache g++-11'
             export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
-            export OVERRIDE_CXX='arm64-g++-wrapper'
-            export OVERRIDE_LD='arm64-g++-wrapper'
+            export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11'
+            export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
             export OVERRIDE_AR='aarch64-linux-gnu-ar'
             
+            # Injecting -std=c++20 directly into EXTRACXXFLAGS instead of a wrapper
             export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
             export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
