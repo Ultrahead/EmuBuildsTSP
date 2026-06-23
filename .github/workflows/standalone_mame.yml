@@ -28,167 +28,178 @@ jobs:
             mame-ccache-
 
       - name: Build in Ubuntu 21.04 Container
-        run: |
-          cat << 'EOF' > build_mame.sh
-          #!/bin/bash
-          set -e
-          
-          echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
-          sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
-          
-          echo '=== Setting up Build Environment ==='
-          apt-get update
-          apt-get install -y software-properties-common wget python3 pkg-config \
-                  build-essential git unzip ccache coreutils make xz-utils lld
-          
-          echo '=== Installing Native & Cross GCC-11 ==='
-          apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
-                  g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        env:
+          BUILD_SCRIPT: |
+            #!/bin/bash
+            set -e
+            
+            echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
+            sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+            
+            echo '=== Setting up Build Environment ==='
+            apt-get update
+            apt-get install -y software-properties-common wget python3 pkg-config \
+                    build-essential git unzip ccache coreutils make xz-utils lld
+            
+            echo '=== Installing Native & Cross GCC-11 ==='
+            apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
+                    g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            
+            echo '=== Bridging LLVM Linker to the Cross-Compiler ==='
+            ln -sf /usr/bin/ld.lld /usr/bin/aarch64-linux-gnu-ld.lld
+            ln -sf /usr/bin/ld.lld /usr/aarch64-linux-gnu/bin/ld.lld
+            
+            echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
+            apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev
+            cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
+            cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
+            cp -a /usr/include/KHR /usr/aarch64-linux-gnu/include/ || true
+            cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
+            cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
+            cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
+            
+            echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
+            mkdir -p /tmp/ghost_deps
+            chown _apt /tmp/ghost_deps || true
+            cd /tmp/ghost_deps
+            
+            apt-get download libsdl2-ttf-dev || true
+            apt-get download libfontconfig-dev || true
+            apt-get download libfontconfig1-dev || true
+            apt-get download libfreetype-dev || true
+            apt-get download libfreetype6-dev || true
+            
+            mkdir -p /tmp/extracted
+            for deb in *.deb; do
+              [ -f "$deb" ] || continue
+              dpkg -x "$deb" /tmp/extracted
+            done
+            
+            echo '=== Deploying Custom SDL2 ==='
+            wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+            mkdir -p /sdl2
+            unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+            
+            echo '=== Satisfying Linker Ghosts with Hollow Static Archives and Dummy Stubs ==='
+            echo 'void hollow_shell(){}' > /tmp/hollow.c
+            echo 'int FcInit(){return 0;}' >> /tmp/hollow.c
+            echo 'void FcFini(){}' >> /tmp/hollow.c
+            echo 'int TTF_Init(){return 0;}' >> /tmp/hollow.c
+            echo 'void TTF_Quit(){}' >> /tmp/hollow.c
+            echo 'int TTF_WasInit(){return 0;}' >> /tmp/hollow.c
+            
+            aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
+            
+            for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
+              aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
+            done
+            
+            echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
+            sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
+            
+            echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
+            cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
+            cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
+            
+            if [ -d /tmp/extracted/usr/include/freetype2 ]; then
+              cp -a /tmp/extracted/usr/include/freetype2/* /usr/aarch64-linux-gnu/include/ || true
+              cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
+            fi
+            
+            mkdir -p /sdl2/include/SDL2
+            cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
+            
+            export PATH="/sdl2/bin:$PATH"
+            export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
+            export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
+            export CCACHE_DIR=/root/.ccache
+            ccache -M 5G
+            
+            echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
+            cd /build/mame
+            grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
+            grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
+            
+            echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
+            find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
+            find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
+            find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_FONTCONFIG/IGNORE_FONTCONFIG/g' || true
+            
+            echo '=== SOURCE CODE LOBOTOMY: Erasing OpenGL, X11 Input, and Font Modules ==='
+            echo '#include "osdcore.h"' > src/osd/modules/render/drawogl.cpp
+            echo 'extern const char RENDERER_OPENGL[] = "opengl";' >> src/osd/modules/render/drawogl.cpp
+            
+            echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_mgr.cpp
+            echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_tool.cpp
+            
+            echo '#include "osdcore.h"' > src/osd/modules/input/input_x11.cpp
+            echo 'extern const char KEYBOARD_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
+            echo 'extern const char MOUSE_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
+            echo 'extern const char LIGHTGUN_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
+            
+            echo '#include "osdcore.h"' > src/osd/modules/font/font_sdl.cpp
+            echo 'extern const char FONT_SDL[] = "sdl";' >> src/osd/modules/font/font_sdl.cpp
+            
+            echo '=== Creating C++20 Compiler Wrappers ==='
+            echo '#!/bin/bash' > /usr/local/bin/arm64-g++-wrapper
+            echo 'exec ccache aarch64-linux-gnu-g++-11 -std=c++20 "$@"' >> /usr/local/bin/arm64-g++-wrapper
+            chmod +x /usr/local/bin/arm64-g++-wrapper
+            
+            echo '#!/bin/bash' > /usr/local/bin/host-g++-wrapper
+            echo 'exec ccache g++-11 -std=c++20 "$@"' >> /usr/local/bin/host-g++-wrapper
+            chmod +x /usr/local/bin/host-g++-wrapper
+            
+            echo '=== Building GENie (Natively) ==='
+            cd /build/mame/3rdparty/genie/build/gmake.linux
+            make clean
+            make -j$(nproc) CC=gcc-11 CXX=g++-11
+            
+            echo '=== Compiling FULL MAME ==='
+            cd /build/mame
+            
+            export HOSTCC='ccache gcc-11'
+            export HOSTCXX='host-g++-wrapper'
+            export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
+            export OVERRIDE_CXX='arm64-g++-wrapper'
+            export OVERRIDE_LD='arm64-g++-wrapper'
+            export OVERRIDE_AR='aarch64-linux-gnu-ar'
+            
+            export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
+            export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+            
+            # -fuse-ld=lld handles the 128MB branch limit, --defsym handles the bleeding-edge PowerPC bug
+            export LDFLAGS='-fuse-ld=lld -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            
+            make -j$(nproc) \
+                  CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
+                  USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
+                  NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
+                  PYTHON_EXECUTABLE=python3 || {
+              echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
+              make CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 \
+                  USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
+                  NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
+                  PYTHON_EXECUTABLE=python3
+              exit 1
+            }
                   
-          echo '=== Bridging LLVM Linker to the Cross-Compiler ==='
-          ln -sf /usr/bin/ld.lld /usr/bin/aarch64-linux-gnu-ld.lld
-          ln -sf /usr/bin/ld.lld /usr/aarch64-linux-gnu/bin/ld.lld
-          
-          echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
-          apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev
-          cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/KHR /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
-          cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
-          
-          echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
-          mkdir -p /tmp/ghost_deps
-          chown _apt /tmp/ghost_deps || true
-          cd /tmp/ghost_deps
-          
-          # We still download the headers (amd64) to satisfy C++ syntax checks
-          apt-get download libsdl2-ttf-dev || true
-          apt-get download libfontconfig-dev || true
-          apt-get download libfontconfig1-dev || true
-          apt-get download libfreetype-dev || true
-          apt-get download libfreetype6-dev || true
-          
-          mkdir -p /tmp/extracted
-          for deb in *.deb; do
-            [ -f "$deb" ] || continue
-            dpkg -x "$deb" /tmp/extracted
-          done
-          
-          echo '=== Deploying Custom SDL2 ==='
-          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
-          mkdir -p /sdl2
-          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          
-          echo '=== Satisfying Linker Ghosts with Hollow Static Archives and Dummy Stubs ==='
-          cat << 'HOLLOW' > /tmp/hollow.c
-          void hollow_shell(){}
-          int FcInit(){return 0;}
-          void FcFini(){}
-          int TTF_Init(){return 0;}
-          void TTF_Quit(){}
-          int TTF_WasInit(){return 0;}
-          HOLLOW
-          
-          aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
-          
-          for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
-            aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
-          done
-          
-          echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
-          sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
-          
-          echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
-          cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
-          cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
-          
-          if [ -d /tmp/extracted/usr/include/freetype2 ]; then
-            cp -a /tmp/extracted/usr/include/freetype2/* /usr/aarch64-linux-gnu/include/ || true
-            cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
-          fi
-          
-          mkdir -p /sdl2/include/SDL2
-          cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
-          
-          export PATH="/sdl2/bin:$PATH"
-          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
-          export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
-          export CCACHE_DIR=/root/.ccache
-          ccache -M 5G
-          
-          echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
-          cd /build/mame
-          grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
-          grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
-          
-          echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
-          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
-          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
-          find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_FONTCONFIG/IGNORE_FONTCONFIG/g' || true
-          
-          echo '=== SOURCE CODE LOBOTOMY: Erasing OpenGL, X11 Input, and Font Modules ==='
-          
-          cat << 'STUB' > src/osd/modules/render/drawogl.cpp
-          #include "osdcore.h"
-          extern const char RENDERER_OPENGL[] = "opengl";
-          STUB
-          
-          cat << 'STUB' > src/osd/modules/opengl/gl_shader_mgr.cpp
-          #include "osdcore.h"
-          STUB
-          
-          cat << 'STUB' > src/osd/modules/opengl/gl_shader_tool.cpp
-          #include "osdcore.h"
-          STUB
-          
-          cat << 'STUB' > src/osd/modules/input/input_x11.cpp
-          #include "osdcore.h"
-          extern const char KEYBOARD_X11[] = "x11";
-          extern const char MOUSE_X11[] = "x11";
-          extern const char LIGHTGUN_X11[] = "x11";
-          STUB
-          
-          cat << 'STUB' > src/osd/modules/font/font_sdl.cpp
-          #include "osdcore.h"
-          extern const char FONT_SDL[] = "sdl";
-          STUB
-          
-          echo '=== Creating C++20 Compiler Wrappers ==='
-          cat << 'WRAPPER' > /usr/local/bin/arm64-g++-wrapper
-          #!/bin/bash
-          exec ccache aarch64-linux-gnu-g++-11 -std=c++20 "$@"
-          WRAPPER
-          chmod +x /usr/local/bin/arm64-g++-wrapper
-          
-          cat << 'WRAPPER' > /usr/local/bin/host-g++-wrapper
-          #!/bin/bash
-          exec ccache g++-11 -std=c++20 "$@"
-          WRAPPER
-          chmod +x /usr/local/bin/host-g++-wrapper
-          
-          echo '=== Building GENie (Natively) ==='
-          cd /build/mame/3rdparty/genie/build/gmake.linux
-          make clean
-          make -j$(nproc) CC=gcc-11 CXX=g++-11
-          
-          echo '=== Compiling FULL MAME ==='
-          cd /build/mame
-          
-          export HOSTCC='ccache gcc-11'
-          export HOSTCXX='host-g++-wrapper'
-          export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
-          export OVERRIDE_CXX='arm64-g++-wrapper'
-          export OVERRIDE_LD='arm64-g++-wrapper'
-          export OVERRIDE_AR='aarch64-linux-gnu-ar'
-          
-          export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
-          export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
-          
-          export LDFLAGS='-fuse-ld=lld -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
-          
-          make -j$(nproc) \
-                CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
-                USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
-                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_P
+            echo '=== Library Dependencies for Final Binary ==='
+            aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
+            
+            aarch64-linux-gnu-strip /build/mame/mame* || true
+
+        run: |
+          echo "$BUILD_SCRIPT" > build_mame.sh
+          chmod +x build_mame.sh
+          docker run --rm \
+            -v ${{ github.workspace }}:/build \
+            -v ${{ github.workspace }}/.ccache:/root/.ccache \
+            -e DEBIAN_FRONTEND=noninteractive \
+            ubuntu:21.04 /build/build_mame.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mame_standalone_arm64_smartpro
+          path: mame/mame*
