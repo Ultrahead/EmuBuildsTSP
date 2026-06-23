@@ -38,13 +38,16 @@ jobs:
           
           echo '=== Setting up Build Environment ==='
           apt-get update
-          # Injected lld to conquer the R_AARCH64_CALL26 limitation
           apt-get install -y software-properties-common wget python3 pkg-config \
                   build-essential git unzip ccache coreutils make xz-utils lld
           
           echo '=== Installing Native & Cross GCC-11 ==='
           apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
                   g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
+                  
+          echo '=== Bridging LLVM Linker to the Cross-Compiler ==='
+          ln -sf /usr/bin/ld.lld /usr/bin/aarch64-linux-gnu-ld.lld
+          ln -sf /usr/bin/ld.lld /usr/aarch64-linux-gnu/bin/ld.lld
           
           echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
           apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev
@@ -79,7 +82,6 @@ jobs:
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           
           echo '=== Satisfying Linker Ghosts with Hollow Static Archives and Dummy Stubs ==='
-          # We create a hollow file equipped with dummy C-stubs to intercept any rogue font calls
           cat << 'HOLLOW' > /tmp/hollow.c
           void hollow_shell(){}
           int FcInit(){return 0;}
@@ -91,7 +93,6 @@ jobs:
           
           aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
           
-          # We wrap the dummy stubs into empty archives for every desktop/font library GENie asks for
           for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
             aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
           done
@@ -185,39 +186,9 @@ jobs:
           export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
           export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
           
-          # The defsym flag elegantly bypasses the PowerPC 601 paradox by mapping the exact mangled symbol to our hollow stub
-          # We add -fuse-ld=lld so the LLVM Linker can create precise range-extension thunks for the 128 MB Branch Limit
           export LDFLAGS='-fuse-ld=lld -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
           
           make -j$(nproc) \
                 CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
                 USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
-                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
-                PYTHON_EXECUTABLE=python3 || {
-            echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
-            make CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 \
-                USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
-                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
-                PYTHON_EXECUTABLE=python3
-            exit 1
-          }
-                
-          echo '=== Library Dependencies for Final Binary ==='
-          aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
-          
-          aarch64-linux-gnu-strip /build/mame/mame* || true
-          EOF
-
-          chmod +x build_mame.sh
-          docker run --rm \
-            -v ${{ github.workspace }}:/build \
-            -v ${{ github.workspace }}/.ccache:/root/.ccache \
-            -e DEBIAN_FRONTEND=noninteractive \
-            ubuntu:21.04 /build/build_mame.sh
-
-      - name: Upload Artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mame_standalone_arm64_smartpro
-          path: mame/mame*
+                NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_P
