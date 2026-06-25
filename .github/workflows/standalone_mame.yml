@@ -28,20 +28,23 @@ jobs:
             mame-ccache-
           save-always: true
 
-      - name: Build in Ubuntu 20.04 Container
+      - name: Build in Ubuntu 21.04 Container
         env:
           BUILD_SCRIPT: |
             #!/bin/bash
             set -e
             
-            echo '=== Setting up Ubuntu 20.04 LTS Build Environment ==='
+            echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
+            sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+            
+            echo '=== Setting up Build Environment ==='
             apt-get update
             apt-get install -y software-properties-common wget python3 pkg-config \
-                    build-essential git unzip ccache coreutils make xz-utils llvm lld
+                    build-essential git unzip ccache coreutils make xz-utils lld
             
-            echo '=== Installing Native & Cross GCC-10 (Matching TSP Target) ==='
-            apt-get install -y gcc-10 g++-10 gcc-10-aarch64-linux-gnu \
-                    g++-10-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            echo '=== Installing Native & Cross GCC-11 ==='
+            apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
+                    g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
             
             echo '=== Bridging LLVM Linker to the Cross-Compiler ==='
             ln -sf /usr/bin/ld.lld /usr/bin/aarch64-linux-gnu-ld.lld
@@ -86,7 +89,7 @@ jobs:
             echo 'void TTF_Quit(){}' >> /tmp/hollow.c
             echo 'int TTF_WasInit(){return 0;}' >> /tmp/hollow.c
             
-            aarch64-linux-gnu-gcc-10 -c /tmp/hollow.c -o /tmp/hollow.o
+            aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
             
             for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
               aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
@@ -144,24 +147,23 @@ jobs:
             echo '=== Building GENie (Natively) ==='
             cd /build/mame/3rdparty/genie/build/gmake.linux
             make clean
-            make -j$(nproc) CC=gcc-10 CXX=g++-10
+            make -j$(nproc) CC=gcc-11 CXX=g++-11
             
             echo '=== Compiling FULL MAME ==='
             cd /build/mame
             
-            export HOSTCC='ccache gcc-10'
-            export HOSTCXX='ccache g++-10'
-            export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-10'
-            export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-10'
-            export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-10'
+            export HOSTCC='ccache gcc-11'
+            export HOSTCXX='ccache g++-11'
+            export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
+            export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11'
+            export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
             export OVERRIDE_AR='aarch64-linux-gnu-ar'
             
-            # Using -std=c++17 to ensure perfect compatibility with GCC 10
-            export EXTRACFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
-            export EXTRACXXFLAGS='-I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++17'
+            # Using standard GCC 11 with alignment safeguards
+            export EXTRACFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
+            export EXTRACXXFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
-            # Native Dynamic Linking (Removed Static C++ flags to cure the SIGBUS TLS corruption)
-            # Retained LLD page-size and rosegment alignment fixes for the Allwinner Kernel
+            # Static TLS flags removed. LLD Kernel bypasses maintained.
             export LDFLAGS='-fuse-ld=lld -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
@@ -181,6 +183,11 @@ jobs:
               }
             }
                   
+            echo '=== Extracting Dynamic C++ Libraries for Bundle ==='
+            # Resolving symlinks to securely copy the raw GCC 11 libraries into our payload
+            find /usr/aarch64-linux-gnu -name "libstdc++.so.6" -exec cp -L {} /build/mame/ \;
+            find /usr/aarch64-linux-gnu -name "libgcc_s.so.1" -exec cp -L {} /build/mame/ \;
+            
             echo '=== Library Dependencies for Final Binary ==='
             aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
             
@@ -198,7 +205,7 @@ jobs:
             -v ${{ github.workspace }}:/build \
             -v ${{ github.workspace }}/.ccache:/root/.ccache \
             -e DEBIAN_FRONTEND=noninteractive \
-            ubuntu:20.04 /build/build_mame.sh
+            ubuntu:21.04 /build/build_mame.sh
 
       - name: Upload Artifact
         if: success()
