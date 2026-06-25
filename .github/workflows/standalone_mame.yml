@@ -162,7 +162,6 @@ jobs:
             export EXTRACFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
             export EXTRACXXFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
-            # Forced LLD to align ELF memory segments to 4KB pages to match the TSP kernel limitations
             export LDFLAGS='-static-libstdc++ -static-libgcc -fuse-ld=lld -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
@@ -184,8 +183,6 @@ jobs:
                   
             echo '=== Library Dependencies for Final Binary ==='
             aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
-            
-            aarch64-linux-gnu-strip /build/mame/mame* || true
             
             echo '=== Final CCache Statistics (Success) ==='
             ccache -s
