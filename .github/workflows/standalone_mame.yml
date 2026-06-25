@@ -162,7 +162,8 @@ jobs:
             export EXTRACFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
             export EXTRACXXFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
             
-            export LDFLAGS='-static-libstdc++ -static-libgcc -fuse-ld=lld -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            # Injected --no-rosegment to bypass the AArch64 older-kernel ELF loader bug
+            export LDFLAGS='-static-libstdc++ -static-libgcc -fuse-ld=lld -Wl,--no-rosegment -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
                   CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
