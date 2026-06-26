@@ -53,6 +53,21 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends clang-16 lld-16 llvm-16 libc++-16-dev libc++abi-16-dev
             
+            echo '=== Creating Indestructible Compiler Wrappers ==='
+            # These scripts mathematically prevent GENie from stripping the libc++ flag during Precompiled Header generation
+            cat << 'EOF' > /usr/local/bin/clang-wrapper
+            #!/bin/bash
+            exec ccache clang-16 "$@"
+            EOF
+            
+            cat << 'EOF' > /usr/local/bin/clang++-wrapper
+            #!/bin/bash
+            exec ccache clang++-16 -stdlib=libc++ "$@"
+            EOF
+            
+            chmod +x /usr/local/bin/clang-wrapper
+            chmod +x /usr/local/bin/clang++-wrapper
+            
             echo '=== Extracting Ghost Dependency Headers WITHOUT OS Pollution ==='
             mkdir -p /tmp/ghost_deps
             cd /tmp/ghost_deps
@@ -140,18 +155,20 @@ jobs:
             
             export LDFLAGS='-fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
-            # USE_LIBCPP=1 injected directly to force GENie to use LLVM standard libraries for Precompiled Headers
+            # Executing make using our indestructible wrapper scripts
             make -j$(nproc) \
-                  CC="ccache clang-16" CXX="ccache clang++-16" \
-                  OVERRIDE_CC="ccache clang-16" OVERRIDE_CXX="ccache clang++-16" OVERRIDE_LD="ccache clang++-16" OVERRIDE_AR="llvm-ar-16" \
+                  CC="clang-wrapper" CXX="clang++-wrapper" \
+                  OVERRIDE_CC="clang-wrapper" OVERRIDE_CXX="clang++-wrapper" \
+                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-16" \
                   CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                   PYTHON_EXECUTABLE=python3 || {
               echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
               make \
-                  CC="ccache clang-16" CXX="ccache clang++-16" \
-                  OVERRIDE_CC="ccache clang-16" OVERRIDE_CXX="ccache clang++-16" OVERRIDE_LD="ccache clang++-16" OVERRIDE_AR="llvm-ar-16" \
+                  CC="clang-wrapper" CXX="clang++-wrapper" \
+                  OVERRIDE_CC="clang-wrapper" OVERRIDE_CXX="clang++-wrapper" \
+                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-16" \
                   CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
