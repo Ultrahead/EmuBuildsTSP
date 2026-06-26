@@ -84,12 +84,17 @@ jobs:
             mkdir -p /sdl2
             unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
             
-            echo '=== Sideloading All Headers into Isolated Sandbox ==='
+            echo '=== Sideloading All Headers into System Root & Sandbox ==='
+            # Copying physically to /usr/include so 3rd-party GENie modules find them natively
+            cp -a /tmp/extracted/usr/include/* /usr/include/ || true
             cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
             if [ -d /tmp/extracted/usr/include/freetype2 ]; then
+              cp -a /tmp/extracted/usr/include/freetype2/* /usr/include/ || true
               cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
             fi
+            mkdir -p /usr/include/SDL2
             mkdir -p /sdl2/include/SDL2
+            cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /usr/include/SDL2/ || true
             cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
             echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
