@@ -1,4 +1,4 @@
-name: Build MAME (Standalone) Linux ARM64 (TSP)
+name: Build MAME (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -23,65 +23,56 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: mame-ccache-${{ github.run_id }}
+          key: mame-ccache-deb11-${{ github.run_id }}
           restore-keys: |
-            mame-ccache-
+            mame-ccache-deb11-
           save-always: true
 
-      - name: Build in Ubuntu 21.04 Container
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build in Native Debian 11 (ARM64) Container
         env:
           BUILD_SCRIPT: |
             #!/bin/bash
             set -e
             
-            echo '=== Resurrecting Ubuntu 21.04 Repositories ==='
-            sed -i -re 's/([a-z]{2}\.)?archive.ubuntu.com|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
-            
-            echo '=== Setting up Build Environment ==='
+            echo '=== Setting up Native Debian 11 (ARM64) Build Environment ==='
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y software-properties-common wget python3 pkg-config \
-                    build-essential git unzip ccache coreutils make xz-utils lld
+            apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils lsb-release software-properties-common gnupg
             
-            echo '=== Installing Native & Cross GCC-11 ==='
-            apt-get install -y gcc-11 g++-11 gcc-11-aarch64-linux-gnu \
-                    g++-11-aarch64-linux-gnu binutils-aarch64-linux-gnu
+            echo '=== Injecting LLVM/Clang 16 for C++20 Support ==='
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            ./llvm.sh 16
+            apt-get install -y libc++-16-dev libc++abi-16-dev lld-16 llvm-16
             
-            echo '=== Bridging LLVM Linker to the Cross-Compiler ==='
-            ln -sf /usr/bin/ld.lld /usr/bin/aarch64-linux-gnu-ld.lld
-            ln -sf /usr/bin/ld.lld /usr/aarch64-linux-gnu/bin/ld.lld
+            echo '=== Sideloading Headers ==='
+            # Installing dev packages natively to get the headers, avoiding the messy dpkg -x extraction
+            apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
             
-            echo '=== Sideloading GL/X11 Headers into ARM64 Sysroot ==='
-            apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev
-            cp -a /usr/include/GL /usr/aarch64-linux-gnu/include/ || true
-            cp -a /usr/include/EGL /usr/aarch64-linux-gnu/include/ || true
-            cp -a /usr/include/KHR /usr/aarch64-linux-gnu/include/ || true
-            cp -a /usr/include/GLES2 /usr/aarch64-linux-gnu/include/ || true
-            cp -a /usr/include/GLES3 /usr/aarch64-linux-gnu/include/ || true
-            cp -a /usr/include/X11 /usr/aarch64-linux-gnu/include/ || true
+            mkdir -p /sdl2/include/SDL2
+            cp -a /usr/include/GL /sdl2/include/ || true
+            cp -a /usr/include/EGL /sdl2/include/ || true
+            cp -a /usr/include/GLES2 /sdl2/include/ || true
+            cp -a /usr/include/GLES3 /sdl2/include/ || true
+            cp -a /usr/include/X11 /sdl2/include/ || true
+            cp -a /usr/include/freetype2/* /sdl2/include/ || true
+            cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
-            echo '=== Extracting Ghost Dependency Headers WITHOUT pkg-config Pollution ==='
-            mkdir -p /tmp/ghost_deps
-            chown _apt /tmp/ghost_deps || true
-            cd /tmp/ghost_deps
-            
-            apt-get download libsdl2-ttf-dev || true
-            apt-get download libfontconfig-dev || true
-            apt-get download libfontconfig1-dev || true
-            apt-get download libfreetype-dev || true
-            apt-get download libfreetype6-dev || true
-            
-            mkdir -p /tmp/extracted
-            for deb in *.deb; do
-              [ -f "$deb" ] || continue
-              dpkg -x "$deb" /tmp/extracted
-            done
+            echo '=== Purging Dynamic Libraries to Prevent Linker Pollution ==='
+            # Violently erasing the system libraries so MAME cannot dynamically link to them
+            apt-get remove --purge -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev libx11-6 libgl1 libgles2 libfreetype6 libfontconfig1
+            apt-get autoremove -y
             
             echo '=== Deploying Custom SDL2 ==='
             wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
-            mkdir -p /sdl2
             unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
             
-            echo '=== Satisfying Linker Ghosts with Hollow Static Archives and Dummy Stubs ==='
+            echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
             echo 'void hollow_shell(){}' > /tmp/hollow.c
             echo 'int FcInit(){return 0;}' >> /tmp/hollow.c
             echo 'void FcFini(){}' >> /tmp/hollow.c
@@ -89,26 +80,14 @@ jobs:
             echo 'void TTF_Quit(){}' >> /tmp/hollow.c
             echo 'int TTF_WasInit(){return 0;}' >> /tmp/hollow.c
             
-            aarch64-linux-gnu-gcc-11 -c /tmp/hollow.c -o /tmp/hollow.o
+            clang-16 -c /tmp/hollow.c -o /tmp/hollow.o
             
             for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
-              aarch64-linux-gnu-ar rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
+              llvm-ar-16 rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
             done
             
             echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
             sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
-            
-            echo '=== Sideloading Font Headers into Custom SDL Sandbox ==='
-            cp -a /tmp/extracted/usr/include/* /usr/aarch64-linux-gnu/include/ || true
-            cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
-            
-            if [ -d /tmp/extracted/usr/include/freetype2 ]; then
-              cp -a /tmp/extracted/usr/include/freetype2/* /usr/aarch64-linux-gnu/include/ || true
-              cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
-            fi
-            
-            mkdir -p /sdl2/include/SDL2
-            cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
             export PATH="/sdl2/bin:$PATH"
             export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
@@ -116,8 +95,6 @@ jobs:
             
             export CCACHE_DIR=/root/.ccache
             ccache -M 5G
-            echo '=== Initial CCache Statistics ==='
-            ccache -s
             
             echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
             cd /build/mame
@@ -144,35 +121,34 @@ jobs:
             echo '#include "osdcore.h"' > src/osd/modules/font/font_sdl.cpp
             echo 'extern const char FONT_SDL[] = "sdl";' >> src/osd/modules/font/font_sdl.cpp
             
-            echo '=== Building GENie (Natively) ==='
+            echo '=== Building GENie (Natively on Emulated ARM64) ==='
             cd /build/mame/3rdparty/genie/build/gmake.linux
             make clean
-            make -j$(nproc) CC=gcc-11 CXX=g++-11
+            make -j$(nproc) CC=clang-16 CXX=clang++-16
             
-            echo '=== Compiling FULL MAME ==='
+            echo '=== Compiling FULL MAME (Master via Clang 16 / libc++) ==='
             cd /build/mame
             
-            export HOSTCC='ccache gcc-11'
-            export HOSTCXX='ccache g++-11'
-            export OVERRIDE_CC='ccache aarch64-linux-gnu-gcc-11'
-            export OVERRIDE_CXX='ccache aarch64-linux-gnu-g++-11'
-            export OVERRIDE_LD='ccache aarch64-linux-gnu-g++-11'
-            export OVERRIDE_AR='aarch64-linux-gnu-ar'
+            export HOSTCC='ccache clang-16'
+            export HOSTCXX='ccache clang++-16'
+            export OVERRIDE_CC='ccache clang-16'
+            export OVERRIDE_CXX='ccache clang++-16'
+            export OVERRIDE_LD='ccache clang++-16'
+            export OVERRIDE_AR='llvm-ar-16'
             
-            # Using standard GCC 11 with alignment safeguards
-            export EXTRACFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10'
-            export EXTRACXXFLAGS='-mstrict-align -I/sdl2/include -I/sdl2/include/SDL2 --param ggc-min-expand=10 -std=c++20'
+            # Forcing Clang to use LLVM's libc++ to bypass GCC 10 limitations and TLS bugs
+            export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
+            export EXTRACXXFLAGS='-stdlib=libc++ -mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
             
-            # Static TLS flags removed. LLD Kernel bypasses maintained.
-            export LDFLAGS='-fuse-ld=lld -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            export LDFLAGS='-stdlib=libc++ -fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
-                  CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
+                  CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                   PYTHON_EXECUTABLE=python3 || {
               echo "=== Parallel build failed! Running single-threaded to catch the exact linker error ==="
-              make CROSS_BUILD=1 TARGETOS=linux PTR64=1 NOWERROR=1 \
+              make CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                   PYTHON_EXECUTABLE=python3 || {
@@ -183,16 +159,15 @@ jobs:
               }
             }
                   
-            echo '=== Extracting Dynamic C++ Libraries for Bundle ==='
-            # Resolving symlinks to securely copy the raw GCC 11 libraries into our payload
-            find /usr/aarch64-linux-gnu -name "libstdc++.so.6" -exec cp -L {} /build/mame/ \;
-            find /usr/aarch64-linux-gnu -name "libgcc_s.so.1" -exec cp -L {} /build/mame/ \;
-            
+            echo '=== Extracting LLVM C++ Library Bundle ==='
+            # Just in case Clang defaults to dynamic linking, we extract libc++.so.1 to ship alongside the binary.
+            find /usr/lib -name "libc++.so.1*" -exec cp -L {} /build/mame/ \;
+                  
             echo '=== Library Dependencies for Final Binary ==='
-            aarch64-linux-gnu-readelf -d /build/mame/mame* | grep NEEDED || true
+            readelf -d /build/mame/mame* | grep NEEDED || true
             
             echo '=== Stripping Binary via LLVM-STRIP (Preserves 4KB ELF Alignment) ==='
-            llvm-strip /build/mame/mame* || true
+            llvm-strip-16 /build/mame/mame || true
             
             echo '=== Final CCache Statistics (Success) ==='
             ccache -s
@@ -202,14 +177,17 @@ jobs:
           echo "$BUILD_SCRIPT" > build_mame.sh
           chmod +x build_mame.sh
           docker run --rm \
+            --platform linux/arm64 \
             -v ${{ github.workspace }}:/build \
             -v ${{ github.workspace }}/.ccache:/root/.ccache \
             -e DEBIAN_FRONTEND=noninteractive \
-            ubuntu:21.04 /build/build_mame.sh
+            debian:11 /build/build_mame.sh
 
       - name: Upload Artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: mame_standalone_arm64_smartpro
-          path: mame/mame*
+          path: |
+            mame/mame*
+            mame/libc++*
