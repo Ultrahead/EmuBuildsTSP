@@ -44,14 +44,14 @@ jobs:
             apt-get update
             apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils lsb-release software-properties-common gnupg
             
-            echo '=== Injecting LLVM/Clang 16 for C++20 Support ==='
-            wget https://apt.llvm.org/llvm.sh
-            chmod +x llvm.sh
-            ./llvm.sh 16
-            apt-get install -y libc++-16-dev libc++abi-16-dev lld-16 llvm-16
+            echo '=== Injecting LLVM/Clang 16 (Bypassing LLDB QEMU Crash) ==='
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+            echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-16 main" > /etc/apt/sources.list.d/llvm.list
+            apt-get update
+            # Surgical install to completely avoid lldb and broken qemu ptrace dependencies
+            apt-get install -y --no-install-recommends clang-16 lld-16 llvm-16 libc++-16-dev libc++abi-16-dev
             
             echo '=== Sideloading Headers ==='
-            # Installing dev packages natively to get the headers, avoiding the messy dpkg -x extraction
             apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
             
             mkdir -p /sdl2/include/SDL2
@@ -64,7 +64,6 @@ jobs:
             cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
             echo '=== Purging Dynamic Libraries to Prevent Linker Pollution ==='
-            # Violently erasing the system libraries so MAME cannot dynamically link to them
             apt-get remove --purge -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev libx11-6 libgl1 libgles2 libfreetype6 libfontconfig1
             apt-get autoremove -y
             
@@ -136,11 +135,11 @@ jobs:
             export OVERRIDE_LD='ccache clang++-16'
             export OVERRIDE_AR='llvm-ar-16'
             
-            # Forcing Clang to use LLVM's libc++ to bypass GCC 10 limitations and TLS bugs
             export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
             export EXTRACXXFLAGS='-stdlib=libc++ -mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
             
-            export LDFLAGS='-stdlib=libc++ -fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            # Using $ORIGIN so MAME natively scopes to our isolated LLVM libraries instead of system libs
+            export LDFLAGS='-stdlib=libc++ -fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
                   CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
@@ -160,8 +159,8 @@ jobs:
             }
                   
             echo '=== Extracting LLVM C++ Library Bundle ==='
-            # Just in case Clang defaults to dynamic linking, we extract libc++.so.1 to ship alongside the binary.
-            find /usr/lib -name "libc++.so.1*" -exec cp -L {} /build/mame/ \;
+            # Pull both libc++ and libc++abi in case they are dynamically linked to each other
+            find /usr/lib -name "libc++*.so.1*" -exec cp -L {} /build/mame/ \;
                   
             echo '=== Library Dependencies for Final Binary ==='
             readelf -d /build/mame/mame* | grep NEEDED || true
