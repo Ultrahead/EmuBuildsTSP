@@ -47,22 +47,21 @@ jobs:
             echo '=== Bypassing Git Dubious Ownership Security Lock ==='
             git config --global --add safe.directory /build/mame
             
-            echo '=== Injecting LLVM/Clang 16 (Bypassing LLDB QEMU Crash) ==='
+            echo '=== Injecting LLVM/Clang 18 (C++20 Constraints Bugfix) ==='
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-            echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-16 main" > /etc/apt/sources.list.d/llvm.list
+            echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-18 main" > /etc/apt/sources.list.d/llvm.list
             apt-get update
-            apt-get install -y --no-install-recommends clang-16 lld-16 llvm-16 libc++-16-dev libc++abi-16-dev
+            apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 libc++-18-dev libc++abi-18-dev
             
             echo '=== Creating Indestructible Compiler Wrappers ==='
-            # These scripts mathematically prevent GENie from stripping the libc++ flag during Precompiled Header generation
             cat << 'EOF' > /usr/local/bin/clang-wrapper
             #!/bin/bash
-            exec ccache clang-16 "$@"
+            exec ccache clang-18 "$@"
             EOF
             
             cat << 'EOF' > /usr/local/bin/clang++-wrapper
             #!/bin/bash
-            exec ccache clang++-16 -stdlib=libc++ "$@"
+            exec ccache clang++-18 -stdlib=libc++ "$@"
             EOF
             
             chmod +x /usr/local/bin/clang-wrapper
@@ -101,10 +100,10 @@ jobs:
             echo 'void TTF_Quit(){}' >> /tmp/hollow.c
             echo 'int TTF_WasInit(){return 0;}' >> /tmp/hollow.c
             
-            clang-16 -c /tmp/hollow.c -o /tmp/hollow.o
+            clang-18 -c /tmp/hollow.c -o /tmp/hollow.o
             
             for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
-              llvm-ar-16 rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
+              llvm-ar-18 rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
             done
             
             echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
@@ -145,21 +144,20 @@ jobs:
             echo '=== Building GENie (Natively on Emulated ARM64) ==='
             cd /build/mame/3rdparty/genie/build/gmake.linux
             make clean
-            make -j$(nproc) CC=clang-16 CXX=clang++-16
+            make -j$(nproc) CC=clang-18 CXX=clang++-18
             
-            echo '=== Compiling FULL MAME (Master via Clang 16 / libc++) ==='
+            echo '=== Compiling FULL MAME (Master via Clang 18 / libc++) ==='
             cd /build/mame
             
             export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
             export EXTRACXXFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
             
-            export LDFLAGS='-fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            export LDFLAGS='-fuse-ld=lld-18 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
-            # Executing make using our indestructible wrapper scripts
             make -j$(nproc) \
                   CC="clang-wrapper" CXX="clang++-wrapper" \
                   OVERRIDE_CC="clang-wrapper" OVERRIDE_CXX="clang++-wrapper" \
-                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-16" \
+                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-18" \
                   CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
@@ -168,7 +166,7 @@ jobs:
               make \
                   CC="clang-wrapper" CXX="clang++-wrapper" \
                   OVERRIDE_CC="clang-wrapper" OVERRIDE_CXX="clang++-wrapper" \
-                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-16" \
+                  OVERRIDE_LD="clang++-wrapper" OVERRIDE_AR="llvm-ar-18" \
                   CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
@@ -187,7 +185,7 @@ jobs:
             readelf -d /build/mame/mame* | grep NEEDED || true
             
             echo '=== Stripping Binary via LLVM-STRIP (Preserves 4KB ELF Alignment) ==='
-            llvm-strip-16 /build/mame/mame || true
+            llvm-strip-18 /build/mame/mame || true
             
             echo '=== Final CCache Statistics (Success) ==='
             ccache -s
