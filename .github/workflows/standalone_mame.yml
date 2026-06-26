@@ -136,15 +136,15 @@ jobs:
             cd /build/mame
             
             export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
-            export EXTRACXXFLAGS='-stdlib=libc++ -mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
+            export EXTRACXXFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
             
-            export LDFLAGS='-stdlib=libc++ -fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            export LDFLAGS='-fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
-            # Explicitly passing CC and CXX overrides via command line to bypass the sanity check
+            # USE_LIBCPP=1 injected directly to force GENie to use LLVM standard libraries for Precompiled Headers
             make -j$(nproc) \
                   CC="ccache clang-16" CXX="ccache clang++-16" \
                   OVERRIDE_CC="ccache clang-16" OVERRIDE_CXX="ccache clang++-16" OVERRIDE_LD="ccache clang++-16" OVERRIDE_AR="llvm-ar-16" \
-                  CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 \
+                  CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 REGENIE=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                   PYTHON_EXECUTABLE=python3 || {
@@ -152,7 +152,7 @@ jobs:
               make \
                   CC="ccache clang-16" CXX="ccache clang++-16" \
                   OVERRIDE_CC="ccache clang-16" OVERRIDE_CXX="ccache clang++-16" OVERRIDE_LD="ccache clang++-16" OVERRIDE_AR="llvm-ar-16" \
-                  CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 \
+                  CROSS_BUILD=0 TARGETOS=linux PTR64=1 NOWERROR=1 USE_LIBCPP=1 \
                   USE_QTDEBUG=0 USE_X11=0 USE_WAYLAND=0 USE_OPENGL=0 USE_BGFX=0 USE_FONTCONFIG=0 USE_XINPUT=0 \
                   NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_ALSA=1 NO_USE_PULSEAUDIO=1 \
                   PYTHON_EXECUTABLE=python3 || {
