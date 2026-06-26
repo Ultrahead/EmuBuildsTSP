@@ -48,28 +48,33 @@ jobs:
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
             echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-16 main" > /etc/apt/sources.list.d/llvm.list
             apt-get update
-            # Surgical install to completely avoid lldb and broken qemu ptrace dependencies
             apt-get install -y --no-install-recommends clang-16 lld-16 llvm-16 libc++-16-dev libc++abi-16-dev
             
-            echo '=== Sideloading Headers ==='
-            apt-get install -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev
+            echo '=== Extracting Ghost Dependency Headers WITHOUT OS Pollution ==='
+            mkdir -p /tmp/ghost_deps
+            cd /tmp/ghost_deps
             
-            mkdir -p /sdl2/include/SDL2
-            cp -a /usr/include/GL /sdl2/include/ || true
-            cp -a /usr/include/EGL /sdl2/include/ || true
-            cp -a /usr/include/GLES2 /sdl2/include/ || true
-            cp -a /usr/include/GLES3 /sdl2/include/ || true
-            cp -a /usr/include/X11 /sdl2/include/ || true
-            cp -a /usr/include/freetype2/* /sdl2/include/ || true
-            cp /usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
+            # Downloading instead of installing to bypass the QEMU segfault during removal
+            apt-get download libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev || true
             
-            echo '=== Purging Dynamic Libraries to Prevent Linker Pollution ==='
-            apt-get remove --purge -y libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev libx11-6 libgl1 libgles2 libfreetype6 libfontconfig1
-            apt-get autoremove -y
+            mkdir -p /tmp/extracted
+            for deb in *.deb; do
+              [ -f "$deb" ] || continue
+              dpkg -x "$deb" /tmp/extracted
+            done
             
             echo '=== Deploying Custom SDL2 ==='
             wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+            mkdir -p /sdl2
             unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+            
+            echo '=== Sideloading All Headers into Isolated Sandbox ==='
+            cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
+            if [ -d /tmp/extracted/usr/include/freetype2 ]; then
+              cp -a /tmp/extracted/usr/include/freetype2/* /sdl2/include/ || true
+            fi
+            mkdir -p /sdl2/include/SDL2
+            cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
             echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
             echo 'void hollow_shell(){}' > /tmp/hollow.c
@@ -138,7 +143,6 @@ jobs:
             export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
             export EXTRACXXFLAGS='-stdlib=libc++ -mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
             
-            # Using $ORIGIN so MAME natively scopes to our isolated LLVM libraries instead of system libs
             export LDFLAGS='-stdlib=libc++ -fuse-ld=lld-16 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
             
             make -j$(nproc) \
@@ -159,7 +163,6 @@ jobs:
             }
                   
             echo '=== Extracting LLVM C++ Library Bundle ==='
-            # Pull both libc++ and libc++abi in case they are dynamically linked to each other
             find /usr/lib -name "libc++*.so.1*" -exec cp -L {} /build/mame/ \;
                   
             echo '=== Library Dependencies for Final Binary ==='
