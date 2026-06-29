@@ -39,10 +39,16 @@ jobs:
             #!/bin/bash
             set -e
             
-            echo '=== Setting up Native Debian 11 (ARM64) Build Environment ==='
+            echo '=== Applying QEMU Core Freeze ==='
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils lsb-release software-properties-common gnupg
+            
+            # Administratively locking the core C-libraries so QEMU never executes the corrupted ldconfig trigger
+            apt-mark hold libc-bin libc6
+            
+            echo '=== Setting up Native Debian 11 (ARM64) Build Environment ==='
+            # Eradicated software-properties-common and lsb-release to prevent pulling in dbus and auto-upgraders
+            apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils gnupg
             
             echo '=== Bypassing Git Dubious Ownership Security Lock ==='
             git config --global --add safe.directory /build/mame
@@ -85,7 +91,6 @@ jobs:
             unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
             
             echo '=== Sideloading All Headers into System Root & Sandbox ==='
-            # Copying physically to /usr/include so 3rd-party GENie modules find them natively
             cp -a /tmp/extracted/usr/include/* /usr/include/ || true
             cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
             if [ -d /tmp/extracted/usr/include/freetype2 ]; then
