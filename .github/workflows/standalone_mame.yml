@@ -42,12 +42,9 @@ jobs:
             echo '=== Applying QEMU Core Freeze ==='
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            
-            # Administratively locking the core C-libraries so QEMU never executes the corrupted ldconfig trigger
             apt-mark hold libc-bin libc6
             
             echo '=== Setting up Native Debian 11 (ARM64) Build Environment ==='
-            # Eradicated software-properties-common and lsb-release to prevent pulling in dbus and auto-upgraders
             apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils gnupg
             
             echo '=== Bypassing Git Dubious Ownership Security Lock ==='
@@ -73,11 +70,13 @@ jobs:
             chmod +x /usr/local/bin/clang-wrapper
             chmod +x /usr/local/bin/clang++-wrapper
             
-            echo '=== Extracting Ghost Dependency Headers WITHOUT OS Pollution ==='
+            echo '=== Extracting Dependency Packages WITHOUT OS Pollution ==='
             mkdir -p /tmp/ghost_deps
             cd /tmp/ghost_deps
             
-            apt-get download libgl-dev libgles-dev libx11-dev libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev || true
+            apt-get download libgl-dev libgles-dev libglvnd-dev libglx-dev libdrm-dev \
+                             libx11-dev x11proto-dev xtrans-dev libxcb1-dev libxau-dev libxdmcp-dev \
+                             libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev || true
             
             mkdir -p /tmp/extracted
             for deb in *.deb; do
@@ -102,17 +101,37 @@ jobs:
             cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /usr/include/SDL2/ || true
             cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
             
-            echo '=== Satisfying Linker Ghosts with Hollow Static Archives ==='
-            echo 'void hollow_shell(){}' > /tmp/hollow.c
-            echo 'int FcInit(){return 0;}' >> /tmp/hollow.c
-            echo 'void FcFini(){}' >> /tmp/hollow.c
-            echo 'int TTF_Init(){return 0;}' >> /tmp/hollow.c
-            echo 'void TTF_Quit(){}' >> /tmp/hollow.c
-            echo 'int TTF_WasInit(){return 0;}' >> /tmp/hollow.c
+            echo '=== Injecting Real X11 Static Libraries (FAT Binary) ==='
+            # Copying ONLY static archives to force the linker to embed them inside the executable
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libX11.a /sdl2/lib/ || true
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXext.a /sdl2/lib/ || true
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXi.a /sdl2/lib/ || true
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libxcb.a /sdl2/lib/ || true
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXau.a /sdl2/lib/ || true
+            cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXdmcp.a /sdl2/lib/ || true
             
+            echo '=== Packing X11 Dependencies into a Single FAT Archive ==='
+            # Merging X11 baseline dependencies directly into libX11.a to bypass strictly ordered linker errors
+            cd /sdl2/lib
+            llvm-ar-18 x libxcb.a 2>/dev/null || true
+            llvm-ar-18 x libXau.a 2>/dev/null || true
+            llvm-ar-18 x libXdmcp.a 2>/dev/null || true
+            llvm-ar-18 q libX11.a *.o 2>/dev/null || true
+            rm -f *.o
+            cd /build/mame
+            
+            echo '=== Leaving OpenGL Dynamic ==='
+            # Copying ONLY the shared object symlinks so Clang dynamically links GL natively on the TSP
+            cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libGL*.so* /sdl2/lib/ || true
+            cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libEGL*.so* /sdl2/lib/ || true
+            cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libGLESv2*.so* /sdl2/lib/ || true
+            
+            echo '=== Satisfying Remaining Linker Ghosts ==='
+            echo 'void hollow_shell(){}' > /tmp/hollow.c
             clang-18 -c /tmp/hollow.c -o /tmp/hollow.o
             
-            for ghost in GL X11 Xinerama Xext Xi SDL2_ttf fontconfig freetype; do
+            # X11 and GL are removed from this list because we provided the real static/dynamic libraries above
+            for ghost in Xinerama SDL2_ttf fontconfig freetype; do
               llvm-ar-18 rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
             done
             
