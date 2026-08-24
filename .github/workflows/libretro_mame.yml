@@ -2,7 +2,11 @@ name: Build MAME (libretro) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
-
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone up to (leave blank for latest/current repo)'
+        required: false
+        type: string
 jobs:
   build:
     runs-on: ubuntu-latest
