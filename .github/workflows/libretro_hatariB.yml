@@ -2,6 +2,11 @@ name: Build HatariB (Libretro) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone up to (leave blank for latest/current repo)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,9 +20,17 @@ jobs:
 
       - name: Checkout HatariB
         run: |
-          git clone --depth 1 https://github.com/bbbradsmith/hatariB.git hatariB
-          cd hatariB
-          git checkout 73c00106bc8964da1ac99e591e62f7bf69d04d65
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init hatariB
+            cd hatariB
+            git remote add origin https://github.com/bbbradsmith/hatariB.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+          else
+            echo "Cloning latest repository (shallow clone)"
+            git clone --depth 1 https://github.com/bbbradsmith/hatariB.git hatariB
+          fi
       
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
