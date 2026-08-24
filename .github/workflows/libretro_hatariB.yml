@@ -15,8 +15,9 @@ jobs:
 
       - name: Checkout HatariB
         run: |
-          git clone --depth 1 origin 73c00106bc8964da1ac99e591e62f7bf69d04d65 https://github.com/bbbradsmith/hatariB.git hatariB
-          git checkout FETCH_HEAD
+          git clone --depth 1 https://github.com/bbbradsmith/hatariB.git hatariB
+          cd hatariB
+          git switch --detach 73c00106bc8964da1ac99e591e62f7bf69d04d65
       
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
