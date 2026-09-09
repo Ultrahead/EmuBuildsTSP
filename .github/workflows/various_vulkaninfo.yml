@@ -51,7 +51,6 @@ jobs:
           git config --global --add safe.directory '*'
 
           echo '=== Upgrading CMake and Ninja via Pip ==='
-          # Vulkan-Tools requires CMake >= 3.22; Debian 11 archives only provide 3.18
           pip3 install --no-cache-dir cmake ninja
 
           echo '=== Fetching Vulkan Dependencies ==='
@@ -62,9 +61,6 @@ jobs:
           mkdir -p /build/Vulkan-Tools/build
           cd /build/Vulkan-Tools/build
 
-          # Matching the standalone TSP environment:
-          # Disables Wayland and X11 WSI extensions to prevent dynamic linking against
-          # shared libraries missing on TSP's rootfs.
           cmake -GNinja \
                 -C /build/Vulkan-Tools/external/helper.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -95,8 +91,8 @@ jobs:
           # Run the container in native ARM64 mode via QEMU
           docker run --rm \
             --platform linux/arm64 \
-            --cpus="4.0" \
-            --cpu-shares=4096 \
+            --cpus="2.0" \
+            --cpu-shares=2048 \
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
