@@ -13,12 +13,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
 
-      - name: Checkout Vulkan-Headers and Vulkan-Tools (SDK 1.1.130.0)
-        run: |
-          # Pin to SDK 1.1.130.0 for compatibility with Vulkan 1.0 drivers and stubs
-          git clone --depth 1 --branch vulkan-sdk-1.1.130.0 https://github.com/KhronosGroup/Vulkan-Headers.git Vulkan-Headers
-          git clone --depth 1 --branch vulkan-sdk-1.1.130.0 https://github.com/KhronosGroup/Vulkan-Tools.git Vulkan-Tools
-
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
         with:
@@ -27,7 +21,7 @@ jobs:
 
       - name: Build in Debian 11 (ARM64) Container
         run: |
-          cat << 'EOF' > build_vulkaninfo.sh
+          cat << 'EOF' > build_vulkaninfo_tsp.sh
           #!/bin/bash
           set -e
 
@@ -44,46 +38,145 @@ jobs:
           echo '=== Installing Build Dependencies ==='
           apt-get update
           apt-get dist-upgrade -y --allow-downgrades
-          apt-get install -y --allow-downgrades build-essential git wget pkg-config \
-                  python3 python3-pip libvulkan-dev
+          apt-get install -y --allow-downgrades build-essential libvulkan-dev
 
-          git config --global --add safe.directory '*'
+          mkdir -p /build/vulkaninfo_installed/bin
+          cd /build
 
-          echo '=== Installing CMake and Ninja ==='
-          pip3 install --no-cache-dir cmake ninja
+          echo '=== Writing Vulkan 1.0 Inspection Tool ==='
+          cat << 'EOF_SRC' > vulkaninfo_tsp.c
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <stdint.h>
+          #include <vulkan/vulkan.h>
 
-          echo '=== Installing Vulkan-Headers ==='
-          mkdir -p /build/Vulkan-Headers/build
-          cd /build/Vulkan-Headers/build
-          cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr/local ..
-          ninja install
+          int main(void) {
+              printf("=== Vulkan 1.0 Hardware Diagnostic (TSP) ===\n\n");
 
-          echo '=== Building vulkaninfo (SDK 1.1.130.0) ==='
-          mkdir -p /build/Vulkan-Tools/build
-          cd /build/Vulkan-Tools/build
+              // 1. Enumerate Instance Extensions directly via exported symbol
+              uint32_t ext_count = 0;
+              if (vkEnumerateInstanceExtensionProperties(NULL, &ext_count, NULL) == VK_SUCCESS && ext_count > 0) {
+                  VkExtensionProperties exts[ext_count];
+                  vkEnumerateInstanceExtensionProperties(NULL, &ext_count, exts);
+                  printf("Found %u Instance Extensions:\n", ext_count);
+                  for (uint32_t i = 0; i < ext_count; i++) {
+                      printf("  - %s (Spec version %u)\n", exts[i].extensionName, exts[i].specVersion);
+                  }
+                  printf("\n");
+              }
 
-          # Strictly builds vulkaninfo linked to libvulkan.so.1 without X11 or Wayland
-          cmake -GNinja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX=/build/vulkaninfo_installed \
-                -DBUILD_VULKANINFO=ON \
-                -DBUILD_CUBE=OFF \
-                -DBUILD_WERROR=OFF \
-                -DBUILD_WSI_XCB_SUPPORT=OFF \
-                -DBUILD_WSI_XLIB_SUPPORT=OFF \
-                -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
-                ..
+              // 2. Create Instance targeting pure Vulkan 1.0
+              VkApplicationInfo appInfo = {
+                  .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                  .pApplicationName = "vulkaninfo_tsp",
+                  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+                  .pEngineName = "None",
+                  .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+                  .apiVersion = VK_MAKE_VERSION(1, 0, 0)
+              };
 
-          ninja vulkaninfo
-          ninja install
+              VkInstanceCreateInfo instInfo = {
+                  .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                  .pApplicationInfo = &appInfo,
+                  .enabledExtensionCount = 0,
+                  .ppEnabledExtensionNames = NULL,
+                  .enabledLayerCount = 0,
+                  .ppEnabledLayerNames = NULL
+              };
 
-          echo '=== Stripping Binary ==='
+              VkInstance instance;
+              VkResult res = vkCreateInstance(&instInfo, NULL, &instance);
+              if (res != VK_SUCCESS) {
+                  printf("ERROR: vkCreateInstance failed with error code: %d\n", res);
+                  return 1;
+              }
+              printf("SUCCESS: Vulkan 1.0 instance created successfully!\n\n");
+
+              // 3. Enumerate Physical Devices (GPUs)
+              uint32_t gpu_count = 0;
+              res = vkEnumeratePhysicalDevices(instance, &gpu_count, NULL);
+              if (res != VK_SUCCESS || gpu_count == 0) {
+                  printf("WARNING: vkEnumeratePhysicalDevices found 0 GPUs (error %d).\n", res);
+                  vkDestroyInstance(instance, NULL);
+                  return 1;
+              }
+              printf("Detected %u Physical Device(s):\n", gpu_count);
+
+              VkPhysicalDevice gpus[gpu_count];
+              vkEnumeratePhysicalDevices(instance, &gpu_count, gpus);
+
+              for (uint32_t i = 0; i < gpu_count; i++) {
+                  VkPhysicalDeviceProperties props;
+                  VkPhysicalDeviceFeatures features;
+                  VkPhysicalDeviceMemoryProperties memProps;
+
+                  vkGetPhysicalDeviceProperties(gpus[i], &props);
+                  vkGetPhysicalDeviceFeatures(gpus[i], &features);
+                  vkGetPhysicalDeviceMemoryProperties(gpus[i], &memProps);
+
+                  printf("--------------------------------------------------\n");
+                  printf("GPU [%u]: %s\n", i, props.deviceName);
+                  printf("  API Version    : %u.%u.%u\n",
+                         VK_VERSION_MAJOR(props.apiVersion),
+                         VK_VERSION_MINOR(props.apiVersion),
+                         VK_VERSION_PATCH(props.apiVersion));
+                  printf("  Driver Version : %u.%u.%u (raw: 0x%08X)\n",
+                         VK_VERSION_MAJOR(props.driverVersion),
+                         VK_VERSION_MINOR(props.driverVersion),
+                         VK_VERSION_PATCH(props.driverVersion),
+                         props.driverVersion);
+                  printf("  Vendor ID      : 0x%04X\n", props.vendorID);
+                  printf("  Device ID      : 0x%04X\n", props.deviceID);
+                  printf("  Device Type    : ");
+                  switch (props.deviceType) {
+                      case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: printf("Integrated GPU\n"); break;
+                      case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   printf("Discrete GPU\n"); break;
+                      case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    printf("Virtual GPU\n"); break;
+                      case VK_PHYSICAL_DEVICE_TYPE_CPU:            printf("Software / CPU\n"); break;
+                      default:                                     printf("Other\n"); break;
+                  }
+
+                  printf("\n  Limits:\n");
+                  printf("    maxImageDimension2D       : %u\n", props.limits.maxImageDimension2D);
+                  printf("    maxColorAttachments       : %u\n", props.limits.maxColorAttachments);
+                  printf("    maxBoundDescriptorSets    : %u\n", props.limits.maxBoundDescriptorSets);
+                  printf("    maxComputeWorkGroupInvoc  : %u\n", props.limits.maxComputeWorkGroupInvocations);
+
+                  printf("\n  Memory Heaps (%u):\n", memProps.memoryHeapCount);
+                  for (uint32_t h = 0; h < memProps.memoryHeapCount; h++) {
+                      printf("    Heap %u: %llu MB flags: 0x%X\n",
+                             h,
+                             (unsigned long long)(memProps.memoryHeaps[h].size / (1024 * 1024)),
+                             memProps.memoryHeaps[h].flags);
+                  }
+
+                  // Enumerate device-level extensions
+                  uint32_t dev_ext_count = 0;
+                  if (vkEnumerateDeviceExtensionProperties(gpus[i], NULL, &dev_ext_count, NULL) == VK_SUCCESS && dev_ext_count > 0) {
+                      VkExtensionProperties dev_exts[dev_ext_count];
+                      vkEnumerateDeviceExtensionProperties(gpus[i], NULL, &dev_ext_count, dev_exts);
+                      printf("\n  Supported Device Extensions (%u):\n", dev_ext_count);
+                      for (uint32_t e = 0; e < dev_ext_count; e++) {
+                          printf("    - %s (v%u)\n", dev_exts[e].extensionName, dev_exts[e].specVersion);
+                      }
+                  }
+                  printf("--------------------------------------------------\n");
+              }
+
+              vkDestroyInstance(instance, NULL);
+              printf("\nDiagnostic completed successfully.\n");
+              return 0;
+          }
+          EOF_SRC
+
+          echo '=== Compiling vulkaninfo ==='
+          gcc -O2 -Wall vulkaninfo_tsp.c -lvulkan -o /build/vulkaninfo_installed/bin/vulkaninfo
           strip /build/vulkaninfo_installed/bin/vulkaninfo
 
           echo '=== Build Complete ==='
           EOF
 
-          chmod +x build_vulkaninfo.sh
+          chmod +x build_vulkaninfo_tsp.sh
 
           docker run --rm \
             --platform linux/arm64 \
@@ -92,7 +185,7 @@ jobs:
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
-            arm64v8/debian:11.11 /build/build_vulkaninfo.sh
+            arm64v8/debian:11.11 /build/build_vulkaninfo_tsp.sh
 
       - name: Upload Artifact
         if: success()
