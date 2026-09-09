@@ -29,6 +29,9 @@ jobs:
           #!/bin/bash
           set -e
           
+          echo '=== Configuring APT for Expired Release Metadata ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
           apt-get install -y build-essential git wget unzip pkg-config \
