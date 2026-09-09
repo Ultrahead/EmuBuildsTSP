@@ -1,4 +1,4 @@
-name: Build RetroArch (Standalone) Debian 11 ARM64 (TSP)
+name: Build a Test RA
 
 on:
   workflow_dispatch:
