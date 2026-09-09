@@ -32,7 +32,6 @@ jobs:
           echo '=== Configuring APT for Archived Repositories ==='
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
           echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
-          echo 'deb http://archive.debian.org/debian-security bullseye-security main' >> /etc/apt/sources.list
 
           echo '=== Installing Build Dependencies ==='
           apt-get update
