@@ -1,0 +1,110 @@
+name: Build vulkaninfo Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout Vulkan-Tools
+        run: |
+          git clone --recurse-submodules --depth 1 https://github.com/KhronosGroup/Vulkan-Tools.git Vulkan-Tools
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_vulkaninfo.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          # Pin priority > 1000 instructs APT to downgrade pre-installed container packages
+          # to match the exact versions archived in bullseye main.
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget pkg-config \
+                  python3 python3-pip libvulkan-dev
+
+          # Prevent git ownership errors in mounted workspace volumes
+          git config --global --add safe.directory '*'
+
+          echo '=== Upgrading CMake and Ninja via Pip ==='
+          # Vulkan-Tools requires CMake >= 3.22; Debian 11 archives only provide 3.18
+          pip3 install --no-cache-dir cmake ninja
+
+          echo '=== Fetching Vulkan Dependencies ==='
+          cd /build/Vulkan-Tools
+          python3 scripts/update_deps.py --dir /build/Vulkan-Tools/external
+
+          echo '=== Configuring Vulkan-Tools (vulkaninfo) ==='
+          mkdir -p /build/Vulkan-Tools/build
+          cd /build/Vulkan-Tools/build
+
+          # Matching the standalone TSP environment:
+          # Disables Wayland and X11 WSI extensions to prevent dynamic linking against
+          # shared libraries missing on TSP's rootfs.
+          cmake -GNinja \
+                -C /build/Vulkan-Tools/external/helper.cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/build/vulkaninfo_installed \
+                -DBUILD_VULKANINFO=ON \
+                -DBUILD_CUBE=OFF \
+                -DBUILD_ICD=OFF \
+                -DBUILD_WERROR=OFF \
+                -DBUILD_WSI_XCB_SUPPORT=OFF \
+                -DBUILD_WSI_XLIB_SUPPORT=OFF \
+                -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
+                ..
+
+          echo '=== Compiling vulkaninfo ==='
+          ninja vulkaninfo
+
+          echo '=== Installing to Prefix ==='
+          ninja install
+
+          echo '=== Stripping Binary ==='
+          strip /build/vulkaninfo_installed/bin/vulkaninfo
+
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_vulkaninfo.sh
+
+          # Run the container in native ARM64 mode via QEMU
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_vulkaninfo.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkaninfo_tsp_debian11_arm64
+          path: vulkaninfo_installed/
