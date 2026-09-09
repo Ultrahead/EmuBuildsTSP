@@ -1,4 +1,4 @@
-name: Build a Test RA
+name: Build TEST RetroArch (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -114,8 +114,8 @@ jobs:
           # Run the container in native ARM64 mode via QEMU
           docker run --rm \
             --platform linux/arm64 \
-            --cpus="4.0" \
-            --cpu-shares=4096 \
+            --cpus="2.0" \
+            --cpu-shares=2048 \
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
