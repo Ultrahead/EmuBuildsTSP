@@ -13,9 +13,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
 
-      - name: Checkout Vulkan-Tools
+      - name: Checkout Repositories
         run: |
-          git clone --recurse-submodules --depth 1 https://github.com/KhronosGroup/Vulkan-Tools.git Vulkan-Tools
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git Vulkan-Headers
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git Vulkan-Loader
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Tools.git Vulkan-Tools
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
@@ -25,7 +27,7 @@ jobs:
 
       - name: Build in Debian 11 (ARM64) Container
         run: |
-          cat << 'EOF' > build_vulkaninfo.sh
+          cat << 'EOF' > build_vulkan_stack.sh
           #!/bin/bash
           set -e
 
@@ -33,8 +35,6 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
           echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
 
-          # Pin priority > 1000 instructs APT to downgrade pre-installed container packages
-          # to match the exact versions archived in bullseye main.
           cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
           Package: *
           Pin: release n=bullseye
@@ -47,26 +47,42 @@ jobs:
           apt-get install -y --allow-downgrades build-essential git wget pkg-config \
                   python3 python3-pip
 
-          # Prevent git ownership errors in mounted workspace volumes
           git config --global --add safe.directory '*'
 
-          echo '=== Upgrading CMake and Ninja via Pip ==='
+          echo '=== Installing CMake and Ninja ==='
           pip3 install --no-cache-dir cmake ninja
 
-          echo '=== Fetching Vulkan-Headers ==='
-          # Clone matching Vulkan-Headers directly to bypass building extraneous test suites
-          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /build/Vulkan-Headers
-          
+          echo '=== Building Vulkan-Headers ==='
           mkdir -p /build/Vulkan-Headers/build
           cd /build/Vulkan-Headers/build
           cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr/local ..
           ninja install
 
-          echo '=== Configuring Vulkan-Tools (vulkaninfo) ==='
+          echo '=== Building Khronos Vulkan-Loader ==='
+          mkdir -p /build/Vulkan-Loader/build
+          cd /build/Vulkan-Loader/build
+          cmake -GNinja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr/local \
+                -DBUILD_TESTS=OFF \
+                -DBUILD_WERROR=OFF \
+                -DBUILD_WSI_XCB_SUPPORT=OFF \
+                -DBUILD_WSI_XLIB_SUPPORT=OFF \
+                -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
+                ..
+          ninja install
+
+          # Prepare artifact directories
+          mkdir -p /build/vulkaninfo_installed/bin
+          mkdir -p /build/vulkaninfo_installed/lib64
+          mkdir -p /build/vulkaninfo_installed/etc/vulkan/icd.d
+
+          # Copy official loader to artifact package
+          cp -a /usr/local/lib/libvulkan.so* /build/vulkaninfo_installed/lib64/
+
+          echo '=== Building vulkaninfo ==='
           mkdir -p /build/Vulkan-Tools/build
           cd /build/Vulkan-Tools/build
-
-          # Strictly target vulkaninfo and disable all desktop window system extensions (X11/Wayland)
           cmake -GNinja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/build/vulkaninfo_installed \
@@ -78,22 +94,29 @@ jobs:
                 -DBUILD_WSI_XLIB_SUPPORT=OFF \
                 -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
                 ..
-
-          echo '=== Compiling vulkaninfo ==='
           ninja vulkaninfo
-
-          echo '=== Installing to Prefix ==='
           ninja install
 
-          echo '=== Stripping Binary ==='
+          echo '=== Generating PowerVR ICD Manifest ==='
+          cat << 'EOF_ICD' > /build/vulkaninfo_installed/etc/vulkan/icd.d/powervr_icd.json
+          {
+              "file_format_version": "1.0.0",
+              "ICD": {
+                  "library_path": "/usr/lib/libVK_IMG.so.1",
+                  "api_version": "1.0.0"
+              }
+          }
+          EOF_ICD
+
+          echo '=== Stripping Binaries ==='
           strip /build/vulkaninfo_installed/bin/vulkaninfo
+          strip /build/vulkaninfo_installed/lib64/libvulkan.so.*.*.* 2>/dev/null || true
 
           echo '=== Build Complete ==='
           EOF
 
-          chmod +x build_vulkaninfo.sh
+          chmod +x build_vulkan_stack.sh
 
-          # Run container with max 2.0 vCPUs matching runner capacity
           docker run --rm \
             --platform linux/arm64 \
             --cpus="2.0" \
@@ -101,7 +124,7 @@ jobs:
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
-            arm64v8/debian:11.11 /build/build_vulkaninfo.sh
+            arm64v8/debian:11.11 /build/build_vulkan_stack.sh
 
       - name: Upload Artifact
         if: success()
