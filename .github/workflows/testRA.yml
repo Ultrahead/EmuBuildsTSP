@@ -1,4 +1,4 @@
-name: Build Test-RetroArch (Standalone) Debian 11 ARM64 (TSP)
+name: Build RetroArch (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -17,7 +17,9 @@ jobs:
         run: |
           git clone --recurse-submodules https://github.com/libretro/RetroArch.git RetroArch
           cd RetroArch
-          if ! grep -q "retrying without oldSwapchain" gfx/drivers_context/vulkan_wsi.c; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! grep -q "retrying without oldSwapchain" gfx/common/vulkan_common.c; then
             echo "Commit 635373a4 missing; cherry-picking PowerVR swapchain fix..."
             git fetch origin 635373a475f20cabb370a6bd424b2de49a491add
             git cherry-pick 635373a475f20cabb370a6bd424b2de49a491add
