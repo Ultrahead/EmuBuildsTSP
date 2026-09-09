@@ -1,4 +1,4 @@
-name: Build vulkaninfo Debian 11 ARM64 (TSP)
+name: Build VulkanInfo Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
           apt-get update
           apt-get dist-upgrade -y --allow-downgrades
           apt-get install -y --allow-downgrades build-essential git wget pkg-config \
-                  python3 python3-pip libvulkan-dev
+                  python3 python3-pip
 
           # Prevent git ownership errors in mounted workspace volumes
           git config --global --add safe.directory '*'
@@ -53,16 +53,21 @@ jobs:
           echo '=== Upgrading CMake and Ninja via Pip ==='
           pip3 install --no-cache-dir cmake ninja
 
-          echo '=== Fetching Vulkan Dependencies ==='
-          cd /build/Vulkan-Tools
-          python3 scripts/update_deps.py --dir /build/Vulkan-Tools/external
+          echo '=== Fetching Vulkan-Headers ==='
+          # Clone matching Vulkan-Headers directly to bypass building extraneous test suites
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /build/Vulkan-Headers
+          
+          mkdir -p /build/Vulkan-Headers/build
+          cd /build/Vulkan-Headers/build
+          cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          ninja install
 
           echo '=== Configuring Vulkan-Tools (vulkaninfo) ==='
           mkdir -p /build/Vulkan-Tools/build
           cd /build/Vulkan-Tools/build
 
+          # Strictly target vulkaninfo and disable all desktop window system extensions (X11/Wayland)
           cmake -GNinja \
-                -C /build/Vulkan-Tools/external/helper.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/build/vulkaninfo_installed \
                 -DBUILD_VULKANINFO=ON \
@@ -88,7 +93,7 @@ jobs:
 
           chmod +x build_vulkaninfo.sh
 
-          # Run the container in native ARM64 mode via QEMU
+          # Run container with max 2.0 vCPUs matching runner capacity
           docker run --rm \
             --platform linux/arm64 \
             --cpus="2.0" \
