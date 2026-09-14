@@ -2,6 +2,11 @@ name: Build XRoar-Dragon32 (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,8 +20,17 @@ jobs:
 
       - name: Checkout XRoar
         run: |
-          # Full clone as the upstream server often rejects shallow clones over HTTP
-          git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            # Upstream server rejects shallow fetches over HTTP; perform full clone before checkout
+            git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+            cd xroar
+            git checkout ${{ inputs.commit_sha }}
+            git submodule update --init --recursive
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+          fi
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
