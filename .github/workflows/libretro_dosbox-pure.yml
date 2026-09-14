@@ -2,6 +2,11 @@ name: Build Dosbox-Pure (Libretro) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,9 +20,20 @@ jobs:
 
       - name: Checkout Dosbox-Pure
         run: |
-          git clone --depth 1 --branch main https://github.com/schellingb/dosbox-pure.git dosbox-pure
-          cd dosbox-pure
-          git submodule update --init --recursive --depth 1
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init dosbox-pure
+            cd dosbox-pure
+            git remote add origin https://github.com/schellingb/dosbox-pure.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --depth 1 --branch main https://github.com/schellingb/dosbox-pure.git dosbox-pure
+            cd dosbox-pure
+            git submodule update --init --recursive --depth 1
+          fi
 
       - name: Build in Ubuntu 20.04 Container
         run: |
