@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Maximize Runner Disk Space & Create Swap
         run: |
@@ -26,7 +26,6 @@ jobs:
         run: |
           if [ -n "${{ inputs.commit_sha }}" ]; then
             echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
-            # Upstream server rejects shallow fetches over HTTP; perform full clone before checkout
             git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
             cd xroar
             git checkout ${{ inputs.commit_sha }}
@@ -47,15 +46,29 @@ jobs:
           cat << 'EOF' > build_xroar.sh
           #!/bin/bash
           set -e
-          
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          # Standard tools + Audio/Input dev libs required by the configuration
-          apt-get install -y build-essential git wget unzip pkg-config coreutils \
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils \
                   autoconf automake libtool make texinfo \
                   libasound2-dev libudev-dev libsndfile1-dev libjack-dev \
                   libgles2-mesa-dev libegl1-mesa-dev
-          
+
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
           git config --global --add safe.directory '*'
@@ -64,8 +77,8 @@ jobs:
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          
-          # Injecting custom SDL2 paths for Autotools
+          chmod -R +x /sdl2/bin
+
           export PATH="/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
@@ -75,11 +88,9 @@ jobs:
 
           echo '=== Running XRoar Build Sequence ==='
           cd /build/xroar
-          
+
           ./autogen.sh
-          
-          # Using the specific configuration options requested
-          # Note: prefix is set to /build/output to capture the build artifacts
+
           ./configure --prefix=/build/output \
                       --without-x \
                       --without-gtk3 \
@@ -99,20 +110,19 @@ jobs:
                       --disable-sdltest
 
           make -j$(( $(nproc) + 1))
-          
-          # Using prefix-based install to mapped volume
+
           make install
-          
+
           echo '=== Stripping Binary ==='
           if [ -f "/build/output/bin/xroar" ]; then
             strip /build/output/bin/xroar
           fi
-          
+
           echo '=== Build Complete ==='
           EOF
 
           chmod +x build_xroar.sh
-          
+
           docker run --rm \
             --platform linux/arm64 \
             --cpus="4.0" \
