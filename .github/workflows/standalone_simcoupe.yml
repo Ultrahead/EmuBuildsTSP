@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Maximize Runner Disk Space & Create Swap
         run: |
@@ -48,13 +48,27 @@ jobs:
           cat << 'EOF' > build_simcoupe.sh
           #!/bin/bash
           set -e
-          
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          # Added libbz2-dev to resolve the BZip2 missing dependency
-          apt-get install -y build-essential git wget unzip pkg-config coreutils make cmake \
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make cmake \
                   libasound2-dev libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libbz2-dev
-          
+
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
           git config --global --add safe.directory '*'
@@ -63,8 +77,8 @@ jobs:
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          
-          # Environment Setup
+          chmod -R +x /sdl2/bin
+
           export PATH="/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include:/sdl2/include/SDL2:$CPATH"
@@ -73,9 +87,7 @@ jobs:
           echo '=== Configuring & Compiling SimCoupe ==='
           cd /build/simcoupe
           mkdir -p build && cd build
-          
-          # Configure CMake for a release build
-          # FIX: Forcing CMake to find our SDL2 variables since its custom FindSDL2.cmake ignores pkg-config
+
           cmake .. -DCMAKE_BUILD_TYPE=Release \
                    -DCMAKE_PREFIX_PATH=/sdl2 \
                    -DSDL2_INCLUDE_DIR=/sdl2/include/SDL2 \
@@ -83,8 +95,7 @@ jobs:
                    -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
                    -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
                    -DCMAKE_EXE_LINKER_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
-          
-          # Compile
+
           make -j$(nproc)
 
           echo '=== Packaging Binary ==='
@@ -96,7 +107,7 @@ jobs:
           EOF
 
           chmod +x build_simcoupe.sh
-          
+
           docker run --rm \
             --platform linux/arm64 \
             --cpus="4.0" \
