@@ -2,6 +2,11 @@ name: Build Flycast (standalone) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -14,7 +19,19 @@ jobs:
           sudo docker image prune --all --force
 
       - name: Checkout Flycast
-        run: git clone --recurse-submodules --shallow-submodules --depth 1 https://github.com/flyinghead/flycast.git flycast
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init flycast
+            cd flycast
+            git remote add origin https://github.com/flyinghead/flycast.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules --shallow-submodules --depth 1 https://github.com/flyinghead/flycast.git flycast
+          fi
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
