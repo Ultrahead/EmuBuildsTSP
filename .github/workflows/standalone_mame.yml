@@ -58,57 +58,73 @@ jobs:
           BUILD_SCRIPT: |
             #!/bin/bash
             set -e
-            
+
+            echo '=== Bypassing QEMU ldconfig Crash ==='
+            dpkg-divert --local --rename --add /sbin/ldconfig
+            ln -sf /bin/true /sbin/ldconfig
+
+            echo '=== Configuring APT for Archived Repositories ==='
+            echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+            echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+            cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+            Package: *
+            Pin: release n=bullseye
+            Pin-Priority: 1001
+            EOF_PREF
+
             echo '=== Applying QEMU Core Freeze ==='
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
+            apt-get dist-upgrade -y --allow-downgrades
             apt-mark hold libc-bin libc6
-            
+
             echo '=== Setting up Native Debian 11 (ARM64) Build Environment ==='
-            apt-get install -y wget python3 pkg-config build-essential git unzip ccache make xz-utils gnupg
-            
+            apt-get install -y --allow-downgrades wget python3 pkg-config build-essential git unzip ccache make xz-utils gnupg
+
             echo '=== Bypassing Git Dubious Ownership Security Lock ==='
             git config --global --add safe.directory /build/mame
-            
+
             echo '=== Injecting LLVM/Clang 18 (C++20 Constraints Bugfix) ==='
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
             echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-18 main" > /etc/apt/sources.list.d/llvm.list
             apt-get update
             apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 libc++-18-dev libc++abi-18-dev
-            
+
             echo '=== Creating Indestructible Compiler Wrappers ==='
             cat << 'EOF' > /usr/local/bin/clang-wrapper
             #!/bin/bash
             exec ccache clang-18 "$@"
             EOF
-            
+
             cat << 'EOF' > /usr/local/bin/clang++-wrapper
             #!/bin/bash
             exec ccache clang++-18 -stdlib=libc++ "$@"
             EOF
-            
+
             chmod +x /usr/local/bin/clang-wrapper
             chmod +x /usr/local/bin/clang++-wrapper
-            
+
             echo '=== Extracting Dependency Packages WITHOUT OS Pollution ==='
             mkdir -p /tmp/ghost_deps
             cd /tmp/ghost_deps
-            
+
             apt-get download libgl-dev libgles-dev libglvnd-dev libglx-dev libdrm-dev \
                              libx11-dev x11proto-dev xtrans-dev libxcb1-dev libxau-dev libxdmcp-dev \
                              libxext-dev libxi-dev libsdl2-ttf-dev libfontconfig1-dev libfreetype6-dev || true
-            
+
             mkdir -p /tmp/extracted
             for deb in *.deb; do
               [ -f "$deb" ] || continue
               dpkg -x "$deb" /tmp/extracted
             done
-            
+
             echo '=== Deploying Custom SDL2 ==='
             wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
             mkdir -p /sdl2
             unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-            
+            chmod -R +x /sdl2/bin
+
             echo '=== Sideloading All Headers into System Root & Sandbox ==='
             cp -a /tmp/extracted/usr/include/* /usr/include/ || true
             cp -a /tmp/extracted/usr/include/* /sdl2/include/ || true
@@ -120,18 +136,16 @@ jobs:
             mkdir -p /sdl2/include/SDL2
             cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /usr/include/SDL2/ || true
             cp /tmp/extracted/usr/include/SDL2/SDL_ttf.h /sdl2/include/SDL2/ || true
-            
+
             echo '=== Injecting Real X11 Static Libraries (FAT Binary) ==='
-            # Copying ONLY static archives to force the linker to embed them inside the executable
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libX11.a /sdl2/lib/ || true
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXext.a /sdl2/lib/ || true
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXi.a /sdl2/lib/ || true
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libxcb.a /sdl2/lib/ || true
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXau.a /sdl2/lib/ || true
             cp /tmp/extracted/usr/lib/aarch64-linux-gnu/libXdmcp.a /sdl2/lib/ || true
-            
+
             echo '=== Packing X11 Dependencies into a Single FAT Archive ==='
-            # Merging X11 baseline dependencies directly into libX11.a to bypass strictly ordered linker errors
             cd /sdl2/lib
             llvm-ar-18 x libxcb.a 2>/dev/null || true
             llvm-ar-18 x libXau.a 2>/dev/null || true
@@ -139,70 +153,68 @@ jobs:
             llvm-ar-18 q libX11.a *.o 2>/dev/null || true
             rm -f *.o
             cd /build/mame
-            
+
             echo '=== Leaving OpenGL Dynamic ==='
-            # Copying ONLY the shared object symlinks so Clang dynamically links GL natively on the TSP
             cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libGL*.so* /sdl2/lib/ || true
             cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libEGL*.so* /sdl2/lib/ || true
             cp -P /tmp/extracted/usr/lib/aarch64-linux-gnu/libGLESv2*.so* /sdl2/lib/ || true
-            
+
             echo '=== Satisfying Remaining Linker Ghosts ==='
             echo 'void hollow_shell(){}' > /tmp/hollow.c
             clang-18 -c /tmp/hollow.c -o /tmp/hollow.o
-            
-            # X11 and GL are removed from this list because we provided the real static/dynamic libraries above
+
             for ghost in Xinerama SDL2_ttf fontconfig freetype; do
               llvm-ar-18 rcs "/sdl2/lib/lib${ghost}.a" /tmp/hollow.o
             done
-            
+
             echo '=== Eradicating Toxic Linker Flags from SDL2 Configs ==='
             sed -i -E 's/-l(X11|Xext|Xinerama|Xi|GL)\b//g' /sdl2/lib/pkgconfig/sdl2.pc /sdl2/bin/sdl2-config || true
-            
+
             export PATH="/sdl2/bin:$PATH"
             export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig"
             export PKG_CONFIG_LIBDIR="/sdl2/lib/pkgconfig"
-            
+
             export CCACHE_DIR=/root/.ccache
             ccache -M 5G
-            
+
             echo '=== NUCLEAR PURGE: Eradicating x86 flags ==='
             cd /build/mame
             grep -rIl '\-m64' . | xargs sed -i 's/-m64//g' || true
             grep -rIl '\-m32' . | xargs sed -i 's/-m32//g' || true
-            
+
             echo '=== SOURCE CODE LOBOTOMY: Forcing MAME to forget Desktop Linux ==='
             find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_X11/IGNORE_X11/g' || true
             find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_WAYLAND/IGNORE_WAYLAND/g' || true
             find src -type f -name "*.cpp" -o -name "*.h" -o -name "*.mm" | xargs sed -i 's/SDLMAME_FONTCONFIG/IGNORE_FONTCONFIG/g' || true
-            
+
             echo '=== SOURCE CODE LOBOTOMY: Erasing OpenGL, X11 Input, and Font Modules ==='
             echo '#include "osdcore.h"' > src/osd/modules/render/drawogl.cpp
             echo 'extern const char RENDERER_OPENGL[] = "opengl";' >> src/osd/modules/render/drawogl.cpp
-            
+
             echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_mgr.cpp
             echo '#include "osdcore.h"' > src/osd/modules/opengl/gl_shader_tool.cpp
-            
+
             echo '#include "osdcore.h"' > src/osd/modules/input/input_x11.cpp
             echo 'extern const char KEYBOARD_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
             echo 'extern const char MOUSE_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
             echo 'extern const char LIGHTGUN_X11[] = "x11";' >> src/osd/modules/input/input_x11.cpp
-            
+
             echo '#include "osdcore.h"' > src/osd/modules/font/font_sdl.cpp
             echo 'extern const char FONT_SDL[] = "sdl";' >> src/osd/modules/font/font_sdl.cpp
-            
+
             echo '=== Building GENie (Natively on Emulated ARM64) ==='
             cd /build/mame/3rdparty/genie/build/gmake.linux
             make clean
             make -j$(nproc) CC=clang-18 CXX=clang++-18
-            
+
             echo '=== Compiling FULL MAME (Master via Clang 18 / libc++) ==='
             cd /build/mame
-            
+
             export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
             export EXTRACXXFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20 -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
-            
+
             export LDFLAGS='-fuse-ld=lld-18 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
-            
+
             make -j$(nproc) \
                   CC="clang-wrapper" CXX="clang++-wrapper" \
                   OVERRIDE_CC="clang-wrapper" OVERRIDE_CXX="clang++-wrapper" \
@@ -226,16 +238,16 @@ jobs:
                     exit 1
               }
             }
-                  
+
             echo '=== Extracting LLVM C++ Library Bundle ==='
             find /usr/lib -name "libc++*.so.1*" -exec cp -L {} /build/mame/ \;
-                  
+
             echo '=== Library Dependencies for Final Binary ==='
             readelf -d /build/mame/mame* | grep NEEDED || true
-            
+
             echo '=== Stripping Binary via LLVM-STRIP (Preserves 4KB ELF Alignment) ==='
             llvm-strip-18 /build/mame/mame || true
-            
+
             echo '=== Final CCache Statistics (Success) ==='
             ccache -s
             chmod -R 777 /root/.ccache || true
@@ -258,3 +270,593 @@ jobs:
           path: |
             mame/mame*
             mame/libc++*
+```[cite: 20]
+
+---
+
+**standalone_openbor_2.yml**[cite: 21]
+
+```yaml
+name: Build OpenBOR (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space & Create Swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+
+      - name: Checkout OpenBOR
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init openbor
+            cd openbor
+            git remote add origin https://github.com/DCurrent/openbor.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules --depth 1 https://github.com/DCurrent/openbor.git openbor
+          fi
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_openbor.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make \
+                  libvorbis-dev libvpx-dev libvulkan-dev libgles2-mesa-dev libegl1-mesa-dev \
+                  libpng-dev systemd locales-all python3 python3-pip
+
+          pip3 install cmake
+
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Patching Source Code & Build System ==='
+          cd /build/openbor
+
+          cat << 'OPTIONSEOF' > cmake/linux.cmake
+          set(USE_SDL     ON)
+          set(USE_OPENGL  OFF)
+          set(USE_LOADGL  OFF)
+          set(USE_GFX     ON)
+          set(USE_VORBIS  ON)
+          set(USE_WEBM    ON)
+          set(USE_PTHREAD ON)
+          set(ENABLE_STATIC ON)
+          OPTIONSEOF
+
+          sed -i 's/mallinfo2()/mallinfo()/g' engine/source/utils.c
+
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\bstricmp\b/strcasecmp/g; s/\bstrnicmp\b/strncasecmp/g' {} +
+
+          python3 -c '
+          import re
+          path = "CMakeLists.txt"
+          with open(path, "r") as f:
+              content = f.read()
+
+          content = content.replace("-Werror", "-Wno-error")
+
+          new_pthread = "if(USE_PTHREAD)\n  find_package(Threads REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)\nendif()"
+          content = re.sub(r"if\(USE_PTHREAD\).*?endif\(\)", new_pthread, content, flags=re.DOTALL)
+
+          new_sdl2 = "find_package(SDL2 REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)"
+          content = re.sub(r"find_package\(SDL2 REQUIRED\).*?target_link_libraries\(.*?SDL2::SDL2\)", new_sdl2, content, flags=re.DOTALL)
+
+          with open(path, "w") as f:
+              f.write(content)
+          '
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
+
+          export PATH="/usr/local/bin:/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Configuring & Compiling OpenBOR ==='
+          mkdir -p build && cd build
+
+          mkdir -p ../engine/releases
+
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -Wno-dev \
+                -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_EXE_LINKER_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          make -j$(nproc)
+
+          echo '=== Packaging Binary ==='
+          mkdir -p /build/output
+          if [ -f "OpenBOR" ]; then
+            strip OpenBOR
+            cp OpenBOR /build/output/OpenBOR
+          fi
+          EOF
+
+          chmod +x build_openbor.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_openbor.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openbor_standalone_tsp_arm64
+          path: output/OpenBOR
+```[cite: 21]
+
+---
+
+**standalone_simcoupe_2.yml**[cite: 22]
+
+```yaml
+name: Build SimCoupe (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space & Create Swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+
+      - name: Checkout SimCoupe (Dev Branch)
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init simcoupe
+            cd simcoupe
+            git remote add origin https://github.com/simonowen/simcoupe.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --branch dev --recurse-submodules --depth 1 https://github.com/simonowen/simcoupe.git simcoupe
+          fi
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_simcoupe.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make cmake \
+                  libasound2-dev libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libbz2-dev
+
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
+
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include:/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Configuring & Compiling SimCoupe ==='
+          cd /build/simcoupe
+          mkdir -p build && cd build
+
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+                   -DCMAKE_PREFIX_PATH=/sdl2 \
+                   -DSDL2_INCLUDE_DIR=/sdl2/include/SDL2 \
+                   -DSDL2_LIBRARY=/sdl2/lib/libSDL2.so \
+                   -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                   -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                   -DCMAKE_EXE_LINKER_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+
+          make -j$(nproc)
+
+          echo '=== Packaging Binary ==='
+          mkdir -p /build/output
+          if [ -f "simcoupe" ]; then
+             strip simcoupe
+             cp simcoupe /build/output/simcoupe
+          fi
+          EOF
+
+          chmod +x build_simcoupe.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_simcoupe.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simcoupe_standalone_tsp_arm64
+          path: output/simcoupe
+```[cite: 22]
+
+---
+
+**standalone_ti99sim_2.yml**[cite: 23]
+
+```yaml
+name: Build TI-99/4A Sim (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Specific version or archive name (e.g. 0.16.0 or ti99sim-0.16.0.src.tar.xz, leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space & Create Swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_ti99sim.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential wget curl xz-utils unzip pkg-config coreutils make \
+                  libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libssl-dev
+
+          echo '=== Safeguard: Fixing Permissions ==='
+          chown -R root:root /build
+
+          echo '=== Fetching ti99sim Source ==='
+          BASE_URL="https://www.mrousseau.org/programs/ti99sim/archives/"
+
+          if [ -n "$TARGET_VERSION" ]; then
+            if [[ "$TARGET_VERSION" == *.tar.xz ]]; then
+              CHOSEN_FILE="$TARGET_VERSION"
+            else
+              CHOSEN_FILE="ti99sim-${TARGET_VERSION}.src.tar.xz"
+            fi
+            echo "Targeting specified archive: $CHOSEN_FILE"
+          else
+            echo "Scanning for latest release archive..."
+            CHOSEN_FILE=$(curl -s $BASE_URL | grep -oP 'ti99sim-[\d\.]+\.src\.tar\.xz' | sort -V | tail -1)
+          fi
+
+          if [ -z "$CHOSEN_FILE" ]; then
+            echo "ERROR: Could not resolve source file at $BASE_URL"
+            exit 1
+          fi
+
+          echo "Downloading $CHOSEN_FILE..."
+          wget "${BASE_URL}${CHOSEN_FILE}"
+          tar -xvf "$CHOSEN_FILE"
+          cd ti99sim-*/
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
+
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export LDFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+
+          echo '=== Compiling TI-99/4A Simulator ==='
+          make -j$(nproc)
+
+          echo '=== Collecting Binaries Manually ==='
+          mkdir -p /build/output
+
+          if [ -d "bin" ]; then
+            cp -r bin/* /build/output/
+          fi
+
+          make install PREFIX=/build/output || true
+
+          echo '=== Stripping Binaries ==='
+          find /build/output -type f -executable -exec strip {} + || true
+
+          echo '=== Final Check ==='
+          ls -R /build/output
+          EOF
+
+          chmod +x build_ti99sim.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e TARGET_VERSION="${{ inputs.version }}" \
+            arm64v8/debian:11.11 /build/build_ti99sim.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ti99sim_standalone_tsp_arm64
+          path: output/
+```[cite: 23]
+
+---
+
+**standalone_xroar-dragon32_2.yml**[cite: 24]
+
+```yaml
+name: Build XRoar-Dragon32 (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space & Create Swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+
+      - name: Checkout XRoar
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+            cd xroar
+            git checkout ${{ inputs.commit_sha }}
+            git submodule update --init --recursive
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules https://www.6809.org.uk/git/xroar.git xroar
+          fi
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_xroar.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils \
+                  autoconf automake libtool make texinfo \
+                  libasound2-dev libudev-dev libsndfile1-dev libjack-dev \
+                  libgles2-mesa-dev libegl1-mesa-dev
+
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
+
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export LDFLAGS="-L/sdl2/lib -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CPPFLAGS="-I/sdl2/include/SDL2"
+
+          echo '=== Running XRoar Build Sequence ==='
+          cd /build/xroar
+
+          ./autogen.sh
+
+          ./configure --prefix=/build/output \
+                      --without-x \
+                      --without-gtk3 \
+                      --without-gtk2 \
+                      --without-gtkgl \
+                      --without-cocoa \
+                      --without-oss \
+                      --without-pulse \
+                      --without-coreaudio \
+                      --with-jack \
+                      --enable-dragon \
+                      --enable-coco3 \
+                      --enable-mc10 \
+                      --enable-experimental \
+                      --enable-ui-sdl \
+                      --disable-gdb-target \
+                      --disable-sdltest
+
+          make -j$(( $(nproc) + 1))
+
+          make install
+
+          echo '=== Stripping Binary ==='
+          if [ -f "/build/output/bin/xroar" ]; then
+            strip /build/output/bin/xroar
+          fi
+
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_xroar.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_xroar.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xroar_dragon32_standalone_tsp_arm64
+          path: output/
+```[cite: 24]
