@@ -129,5 +129,5 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: jnext_sdl_arm64_smartpro
+          name: jnext_standalone_tsp_arm64
           path: output/jnext
