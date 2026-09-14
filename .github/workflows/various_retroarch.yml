@@ -2,6 +2,11 @@ name: Build RetroArch (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,7 +20,18 @@ jobs:
 
       - name: Checkout RetroArch
         run: |
-          git clone --recurse-submodules --depth 1 https://github.com/libretro/RetroArch.git RetroArch
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init RetroArch
+            cd RetroArch
+            git remote add origin https://github.com/libretro/RetroArch.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules --depth 1 https://github.com/libretro/RetroArch.git RetroArch
+          fi
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
