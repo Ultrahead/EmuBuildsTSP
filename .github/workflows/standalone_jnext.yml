@@ -27,7 +27,7 @@ jobs:
             git remote add origin https://github.com/jorgegv/jnext.git
             git fetch --depth 1 origin ${{ inputs.commit_sha }}
             git checkout FETCH_HEAD
-            git submodule update --init --recursive
+            git submodule update --init --recursive --depth 1
           else
             echo "Cloning latest repository with submodules"
             git clone --recurse-submodules --depth 1 https://github.com/jorgegv/jnext.git jnext
@@ -92,12 +92,16 @@ jobs:
           cd /build/jnext
           git submodule update --init --recursive
 
+          # Configure SDL release with Cortex-A53 microarchitecture tuning and LTO
           cmake -B build/sdl-release \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DENABLE_QT_UI=OFF \
                 -DENABLE_DEBUGGER=OFF \
                 -DENABLE_TESTS=OFF \
                 -DSTATIC_BUILD=OFF \
+                -DCYCLE_ACCURATE=OFF \
+                -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
                 -DCMAKE_PREFIX_PATH=/sdl2 \
                 -DSDL2_DIR=/sdl2/lib/cmake/SDL2
 
