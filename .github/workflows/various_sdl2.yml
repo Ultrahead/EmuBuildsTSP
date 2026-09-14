@@ -7,10 +7,15 @@ jobs:
   build-sdl2:
     runs-on: ubuntu-latest
     steps:
-      - name: Maximize Runner Disk Space
+      - name: Maximize Runner Disk Space & Create Swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
+          # Create an additional swapfile to avoid collision with the runner's default /swapfile
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
 
       - name: Set up QEMU for ARM64
         uses: docker/setup-qemu-action@v3
@@ -51,7 +56,8 @@ jobs:
             --disable-video-kmsdrm --disable-kmsdrm-shared --disable-video-dummy --disable-arts \
             --disable-esd --enable-joystick --enable-haptic --enable-pthreads --enable-pthread-sem \
             --disable-hidapi --disable-sensor --disable-power \
-            LDFLAGS="-lEGL -lGLESv2"
+            CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+            LDFLAGS="-lEGL -lGLESv2 -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
 
           echo '=== Compiling and Installing ==='
           make -j$(nproc)
@@ -83,4 +89,3 @@ jobs:
         with:
           name: sdl2-debian11-arm64-tsp
           path: sdl2/  # This refers to the 'sdl2' folder now in your workspace
-  
