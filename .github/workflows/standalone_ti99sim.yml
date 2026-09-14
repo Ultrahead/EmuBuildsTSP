@@ -2,6 +2,11 @@ name: Build TI-99/4A Sim (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Specific version or archive name (e.g. 0.16.0 or ti99sim-0.16.0.src.tar.xz, leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -51,18 +56,29 @@ jobs:
           echo '=== Safeguard: Fixing Permissions ==='
           chown -R root:root /build
           
-          echo '=== Fetching Latest ti99sim Source ==='
+          echo '=== Fetching ti99sim Source ==='
           BASE_URL="https://www.mrousseau.org/programs/ti99sim/archives/"
-          LATEST_FILE=$(curl -s $BASE_URL | grep -oP 'ti99sim-[\d\.]+\.src\.tar\.xz' | sort -V | tail -1)
           
-          if [ -z "$LATEST_FILE" ]; then
-            echo "ERROR: Could not find latest source file at $BASE_URL"
+          if [ -n "$TARGET_VERSION" ]; then
+            if [[ "$TARGET_VERSION" == *.tar.xz ]]; then
+              CHOSEN_FILE="$TARGET_VERSION"
+            else
+              CHOSEN_FILE="ti99sim-${TARGET_VERSION}.src.tar.xz"
+            fi
+            echo "Targeting specified archive: $CHOSEN_FILE"
+          else
+            echo "Scanning for latest release archive..."
+            CHOSEN_FILE=$(curl -s $BASE_URL | grep -oP 'ti99sim-[\d\.]+\.src\.tar\.xz' | sort -V | tail -1)
+          fi
+          
+          if [ -z "$CHOSEN_FILE" ]; then
+            echo "ERROR: Could not resolve source file at $BASE_URL"
             exit 1
           fi
           
-          echo "Downloading $LATEST_FILE..."
-          wget "${BASE_URL}${LATEST_FILE}"
-          tar -xvf "$LATEST_FILE"
+          echo "Downloading $CHOSEN_FILE..."
+          wget "${BASE_URL}${CHOSEN_FILE}"
+          tar -xvf "$CHOSEN_FILE"
           cd ti99sim-*/
 
           echo '=== Deploying Custom SDL2 Blob ==='
@@ -106,6 +122,7 @@ jobs:
             --memory="6g" \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
+            -e TARGET_VERSION="${{ inputs.version }}" \
             arm64v8/debian:11.11 /build/build_ti99sim.sh
 
       - name: Upload Artifact
