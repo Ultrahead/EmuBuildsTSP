@@ -13,10 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Maximize Runner Disk Space
+      - name: Maximize Runner Disk Space & Create Swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
 
       - name: Checkout OpenBOR
         run: |
@@ -116,7 +120,10 @@ jobs:
           # FIX: Create the missing releases directory so the post-build copy command succeeds
           mkdir -p ../engine/releases
           
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -Wno-dev
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -Wno-dev \
+                -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_EXE_LINKER_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
           make -j$(nproc)
 
           echo '=== Packaging Binary ==='
