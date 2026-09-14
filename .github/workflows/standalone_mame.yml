@@ -13,10 +13,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Maximize Runner Disk Space
+      - name: Maximize Runner Disk Space & Create Swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
+          sudo fallocate -l 8G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
 
       - name: Checkout MAME
         run: |
@@ -194,10 +198,10 @@ jobs:
             echo '=== Compiling FULL MAME (Master via Clang 18 / libc++) ==='
             cd /build/mame
             
-            export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2'
-            export EXTRACXXFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20'
+            export EXTRACFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
+            export EXTRACXXFLAGS='-mno-unaligned-access -I/sdl2/include -I/sdl2/include/SDL2 -std=c++20 -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
             
-            export LDFLAGS='-fuse-ld=lld-18 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell'
+            export LDFLAGS='-fuse-ld=lld-18 -Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096 -Wl,--no-rosegment -L/sdl2/lib -Wl,-rpath='\''$$ORIGIN'\'' -Wl,--hash-style=both -Wl,--defsym=_ZN13ppc601_device24decrementer_int_callbackEi=hollow_shell -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto'
             
             make -j$(nproc) \
                   CC="clang-wrapper" CXX="clang++-wrapper" \
