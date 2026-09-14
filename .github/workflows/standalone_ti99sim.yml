@@ -13,10 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Maximize Runner Disk Space
+      - name: Maximize Runner Disk Space & Create Swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
@@ -91,6 +95,9 @@ jobs:
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export LDFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
 
           echo '=== Compiling TI-99/4A Simulator ==='
           make -j$(nproc)
