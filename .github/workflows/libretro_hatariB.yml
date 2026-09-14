@@ -17,7 +17,6 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
-          # Create an additional swapfile to avoid collision with the runner's default /swapfile
           sudo fallocate -l 4G /swapfile2
           sudo chmod 600 /swapfile2
           sudo mkswap /swapfile2
@@ -49,10 +48,24 @@ jobs:
           #!/bin/bash
           set -e
           
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          # Added zlib1g-dev to provide zlib.h
-          apt-get install -y build-essential git wget unzip pkg-config coreutils make cmake zlib1g-dev
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make cmake zlib1g-dev
           
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
@@ -62,6 +75,7 @@ jobs:
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
           
           # Environment Setup
           export PATH="/sdl2/bin:$PATH"
