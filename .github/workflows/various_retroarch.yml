@@ -144,4 +144,3 @@ jobs:
         with:
           name: retroarch_tsp_debian11_arm64
           path: retroarch_installed/
-```[cite: 13]
