@@ -1,0 +1,133 @@
+name: Build JNext (Standalone) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+
+      - name: Checkout JNext
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init jnext
+            cd jnext
+            git remote add origin https://github.com/jorgegv/jnext.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive
+          else
+            echo "Cloning latest repository with submodules"
+            git clone --recurse-submodules --depth 1 https://github.com/jorgegv/jnext.git jnext
+          fi
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_jnext.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades \
+                  build-essential git wget unzip pkg-config coreutils make cmake \
+                  libpng-dev zlib1g-dev libcurl4-openssl-dev libssl-dev
+
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          echo '=== Deploying Custom SDL2 Blob ==='
+          wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
+          mkdir -p /sdl2
+          unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+
+          echo '=== Configuring Environment Variables ==='
+          export PATH="/sdl2/bin:$PATH"
+          export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export CPATH="/sdl2/include:/sdl2/include/SDL2:$CPATH"
+          export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+          export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
+          export CMAKE_PREFIX_PATH="/sdl2:$CMAKE_PREFIX_PATH"
+
+          echo '=== Verifying Versions ==='
+          cmake --version
+          sdl2-config --version
+
+          echo '=== Configuring JNext via CMake ==='
+          cd /build/jnext
+          git submodule update --init --recursive
+
+          # Configure SDL release (no Qt, dynamic linking, unit tests disabled)
+          cmake -B build/sdl-release \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DENABLE_QT_UI=OFF \
+                -DENABLE_DEBUGGER=OFF \
+                -DENABLE_TESTS=OFF \
+                -DSTATIC_BUILD=OFF \
+                -DCMAKE_PREFIX_PATH=/sdl2 \
+                -DSDL2_DIR=/sdl2/lib/cmake/SDL2
+
+          echo '=== Compiling JNext ==='
+          cmake --build build/sdl-release -j$(nproc)
+
+          echo '=== Renaming and Stripping Binary ==='
+          mkdir -p /build/output
+          if [ -f "build/sdl-release/jnext" ]; then
+            cp build/sdl-release/jnext /build/output/jnext
+            strip /build/output/jnext
+          else
+            echo "ERROR: build/sdl-release/jnext not found!"
+            ls -R build/
+            exit 1
+          fi
+
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_jnext.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_jnext.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jnext_sdl_arm64_smartpro
+          path: output/jnext
