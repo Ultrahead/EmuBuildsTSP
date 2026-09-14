@@ -74,6 +74,7 @@ jobs:
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
 
           echo '=== Configuring Environment Variables ==='
           export PATH="/sdl2/bin:$PATH"
