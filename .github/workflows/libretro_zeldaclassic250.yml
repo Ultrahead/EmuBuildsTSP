@@ -2,6 +2,11 @@ name: Build Zelda Classic (Libretro) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,7 +20,18 @@ jobs:
 
       - name: Checkout Zelda Classic (Recursive)
         run: |
-          git clone --recurse-submodules --depth 1 https://github.com/netux79/zc250x-libretro.git zc250x-libretro
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init zc250x-libretro
+            cd zc250x-libretro
+            git remote add origin https://github.com/netux79/zc250x-libretro.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules --depth 1 https://github.com/netux79/zc250x-libretro.git zc250x-libretro
+          fi
 
       - name: Set up QEMU for ARM64 Emulation
         uses: docker/setup-qemu-action@v3
