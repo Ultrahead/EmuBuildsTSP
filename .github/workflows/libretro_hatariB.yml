@@ -71,6 +71,10 @@ jobs:
           chown -R root:root /build
           git config --global --add safe.directory '*'
 
+          echo '=== Configuring Stack Limits for QEMU ==='
+          ulimit -s 65536 2>/dev/null || ulimit -s unlimited 2>/dev/null || true
+          export QEMU_STACK_SIZE=64M
+
           echo '=== Deploying Custom SDL2 Blob ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
@@ -82,9 +86,11 @@ jobs:
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
-          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
-          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing"
           export LDFLAGS="-L/sdl2/lib -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export AR="gcc-ar"
+          export RANLIB="gcc-ranlib"
 
           echo '=== Compiling HatariB ==='
           cd /build/hatariB
@@ -116,6 +122,8 @@ jobs:
             --cpus="4.0" \
             --cpu-shares=4096 \
             --memory="6g" \
+            --ulimit stack=67108864:67108864 \
+            -e QEMU_STACK_SIZE=64M \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
             arm64v8/debian:11.11 /build/build_hatarib.sh
