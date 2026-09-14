@@ -2,6 +2,11 @@ name: Build MAME (Standalone) Debian 11 ARM64 (TSP)
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,9 +20,20 @@ jobs:
 
       - name: Checkout MAME
         run: |
-          git clone --depth 1 --branch master https://github.com/mamedev/mame.git mame
-          cd mame
-          git submodule update --init --recursive --depth 1
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init mame
+            cd mame
+            git remote add origin https://github.com/mamedev/mame.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --depth 1 --branch master https://github.com/mamedev/mame.git mame
+            cd mame
+            git submodule update --init --recursive --depth 1
+          fi
 
       - name: CCache Initialization
         uses: actions/cache@v4
