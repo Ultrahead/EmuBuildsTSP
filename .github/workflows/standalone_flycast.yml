@@ -13,10 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Maximize Runner Disk Space
+      - name: Maximize Runner Disk Space & Create Swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
+          sudo fallocate -l 4G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
 
       - name: Checkout Flycast
         run: |
@@ -82,7 +86,9 @@ jobs:
           
           cmake .. -Wno-dev \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_CXX_FLAGS='-Wno-psabi' \
+                -DCMAKE_C_FLAGS='-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto' \
+                -DCMAKE_CXX_FLAGS='-Wno-psabi -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto' \
+                -DCMAKE_EXE_LINKER_FLAGS='-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto' \
                 -DSDL2_INCLUDE_DIR='/sdl2/include/SDL2' \
                 -DSDL2_LIBRARY='/sdl2/lib/libSDL2.so' \
                 -DUSE_HOST_SDL=true \
