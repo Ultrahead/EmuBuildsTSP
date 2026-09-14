@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Maximize Runner Disk Space & Create Swap
         run: |
@@ -48,15 +48,30 @@ jobs:
           cat << 'EOF' > build_openbor.sh
           #!/bin/bash
           set -e
-          
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          apt-get install -y build-essential git wget unzip pkg-config coreutils make \
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make \
                   libvorbis-dev libvpx-dev libvulkan-dev libgles2-mesa-dev libegl1-mesa-dev \
                   libpng-dev systemd locales-all python3 python3-pip
-          
+
           pip3 install cmake
-          
+
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
           git config --global --add safe.directory '*'
@@ -64,7 +79,6 @@ jobs:
           echo '=== Patching Source Code & Build System ==='
           cd /build/openbor
 
-          # 1. Overwrite linux.cmake options
           cat << 'OPTIONSEOF' > cmake/linux.cmake
           set(USE_SDL     ON)
           set(USE_OPENGL  OFF)
@@ -76,27 +90,21 @@ jobs:
           set(ENABLE_STATIC ON)
           OPTIONSEOF
 
-          # 2. Fix mallinfo2 -> mallinfo
           sed -i 's/mallinfo2()/mallinfo()/g' engine/source/utils.c
 
-          # 3. Direct Source Patching (The Ultimate Checkmate for stricmp)
-          # This physically replaces the function calls in every C file, bypassing CMake entirely.
           find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/\bstricmp\b/strcasecmp/g; s/\bstrnicmp\b/strncasecmp/g' {} +
 
-          # 4. Force Symbol Resolution and Dependency Links
           python3 -c '
           import re
           path = "CMakeLists.txt"
           with open(path, "r") as f:
               content = f.read()
-          
-          # A) Relax Warnings to prevent unused variable/label breaks
+
           content = content.replace("-Werror", "-Wno-error")
-          
-          # B) Ensure PTHREAD and SDL2 linking logic is correct
+
           new_pthread = "if(USE_PTHREAD)\n  find_package(Threads REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)\nendif()"
           content = re.sub(r"if\(USE_PTHREAD\).*?endif\(\)", new_pthread, content, flags=re.DOTALL)
-          
+
           new_sdl2 = "find_package(SDL2 REQUIRED)\n  target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)"
           content = re.sub(r"find_package\(SDL2 REQUIRED\).*?target_link_libraries\(.*?SDL2::SDL2\)", new_sdl2, content, flags=re.DOTALL)
 
@@ -108,7 +116,8 @@ jobs:
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          
+          chmod -R +x /sdl2/bin
+
           export PATH="/usr/local/bin:/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
@@ -116,10 +125,9 @@ jobs:
 
           echo '=== Configuring & Compiling OpenBOR ==='
           mkdir -p build && cd build
-          
-          # FIX: Create the missing releases directory so the post-build copy command succeeds
+
           mkdir -p ../engine/releases
-          
+
           cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_LINUX=ON -Wno-dev \
                 -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
                 -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
@@ -135,7 +143,7 @@ jobs:
           EOF
 
           chmod +x build_openbor.sh
-          
+
           docker run --rm \
             --platform linux/arm64 \
             --cpus="4.0" \
