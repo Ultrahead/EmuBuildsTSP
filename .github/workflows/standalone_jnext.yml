@@ -45,6 +45,10 @@ jobs:
           #!/bin/bash
           set -e
 
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
           echo '=== Configuring APT for Archived Repositories ==='
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
           echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
@@ -87,7 +91,6 @@ jobs:
           cd /build/jnext
           git submodule update --init --recursive
 
-          # Configure SDL release (no Qt, dynamic linking, unit tests disabled)
           cmake -B build/sdl-release \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DENABLE_QT_UI=OFF \
