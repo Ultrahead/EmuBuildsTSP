@@ -66,8 +66,12 @@ jobs:
           echo '=== Installing Build Dependencies ==='
           apt-get update
           apt-get dist-upgrade -y --allow-downgrades
-          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make cmake \
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make \
+                  python3 python3-pip \
                   libasound2-dev libgles2-mesa-dev libegl1-mesa-dev zlib1g-dev libbz2-dev
+
+          # Install modern CMake (>= 3.28) via pip because Debian 11 apt only provides 3.18.4
+          pip3 install cmake
 
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
@@ -79,10 +83,13 @@ jobs:
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
           chmod -R +x /sdl2/bin
 
-          export PATH="/sdl2/bin:$PATH"
+          export PATH="/usr/local/bin:/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include:/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
+
+          echo '=== Verifying CMake Version ==='
+          cmake --version
 
           echo '=== Configuring & Compiling SimCoupe ==='
           cd /build/simcoupe
