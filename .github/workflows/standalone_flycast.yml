@@ -49,24 +49,43 @@ jobs:
           #!/bin/bash
           set -e
           
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          apt-get install -y wget python3 python3-pip pkg-config build-essential git curl unzip \
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades wget python3 python3-pip pkg-config build-essential git curl unzip \
                   libgles2-mesa-dev libegl1-mesa-dev libcurl4-openssl-dev libudev-dev \
                   liblua5.2-dev libasound2-dev libx11-dev libxext-dev libxrandr-dev \
                   libxrender-dev libdrm-dev libgbm-dev
           
           pip3 install cmake
           
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
           echo '=== Deploying Custom SDL2 Blob ==='
           cd /
-          # Using the raw link to the zip file
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
+          chmod -R +x /sdl2/bin
           
           echo '=== Configuring Environment Variables ==='
-          export PATH="/sdl2/bin:$PATH"
+          export PATH="/usr/local/bin:/sdl2/bin:$PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
           export LD_LIBRARY_PATH="/sdl2/lib:$LD_LIBRARY_PATH"
