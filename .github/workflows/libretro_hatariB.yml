@@ -1,4 +1,4 @@
-name: Build HatariB (Libretro) Debian 11 ARM64 (TSP)
+name: Build HatariB (Libretro) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
