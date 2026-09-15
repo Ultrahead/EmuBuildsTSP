@@ -42,7 +42,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-          image: tonistiigi/binfmt:latest
 
       - name: Build in Debian 11 (ARM64) Container
         run: |
@@ -88,8 +87,8 @@ jobs:
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
-          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing -fsigned-char"
-          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing -fsigned-char"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -mno-unaligned-access -flto -fno-strict-aliasing -fsigned-char"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -mno-unaligned-access -flto -fno-strict-aliasing -fsigned-char"
           export LDFLAGS="-L/sdl2/lib -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
           export AR="gcc-ar"
           export RANLIB="gcc-ranlib"
@@ -99,10 +98,10 @@ jobs:
           git submodule update --init --recursive
           
           echo '=== Patching Hatari Generator Tools for QEMU / ARM64 ==='
-          # Prevent build-time opcode generators from miscompiling under LTO/O3 or failing on unsigned char
+          # Force build-time opcode generators to compile without LTO and with safe alignment under QEMU
           cat << 'CPUEOF' >> hatari/src/cpu/CMakeLists.txt
-          set_target_properties(build68k PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char" LINK_FLAGS "-O0 -fno-lto")
-          set_target_properties(gencpu PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char" LINK_FLAGS "-O0 -fno-lto")
+          set_target_properties(build68k PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
+          set_target_properties(gencpu PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
           CPUEOF
 
           echo '=== Compiling HatariB ==='
