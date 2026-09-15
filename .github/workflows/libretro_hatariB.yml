@@ -97,8 +97,14 @@ jobs:
           cd /build/hatariB
           git submodule update --init --recursive
           
+          echo '=== Patching Makefiles & Build Concurrency ==='
+          # 1. Eradicate -Werror to allow zlib configure to pass without aborting
+          sed -i 's/-Werror//g' makefile makefile.zlib
+          
+          # 2. Prevent unlimited parallel jobs (-j0) from crashing QEMU user emulation
+          sed -i 's/cmake --build \. -j/cmake --build \. -j$(nproc)/g' makefile
+
           echo '=== Patching Hatari Generator Tools for QEMU / ARM64 ==='
-          # Force build-time opcode generators to compile without LTO and with safe alignment under QEMU
           cat << 'CPUEOF' >> hatari/src/cpu/CMakeLists.txt
           set_target_properties(build68k PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
           set_target_properties(gencpu PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
@@ -140,3 +146,4 @@ jobs:
         with:
           name: hatariB_libretro_arm64_smartpro
           path: output/hatariB_libretro.so
+```[cite: 14]
