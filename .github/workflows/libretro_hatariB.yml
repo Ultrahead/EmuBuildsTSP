@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      QEMU_STACK_SIZE: "67108864"
     
     steps:
       - name: Maximize Runner Disk Space & Create Swap
@@ -72,8 +74,8 @@ jobs:
           git config --global --add safe.directory '*'
 
           echo '=== Configuring Stack Limits for QEMU ==='
-          ulimit -s 65536 2>/dev/null || ulimit -s unlimited 2>/dev/null || true
-          export QEMU_STACK_SIZE=64M
+          ulimit -s unlimited 2>/dev/null || ulimit -s 65536 2>/dev/null || true
+          export QEMU_STACK_SIZE=67108864
 
           echo '=== Deploying Custom SDL2 Blob ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
@@ -128,7 +130,7 @@ jobs:
             --cpu-shares=4096 \
             --memory="6g" \
             --ulimit stack=67108864:67108864 \
-            -e QEMU_STACK_SIZE=64M \
+            -e QEMU_STACK_SIZE=67108864 \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
             arm64v8/debian:11.11 /build/build_hatarib.sh
@@ -139,3 +141,4 @@ jobs:
         with:
           name: hatariB_libretro_arm64_smartpro
           path: output/hatariB_libretro.so
+```[cite: 14]
