@@ -30,6 +30,12 @@ jobs:
           sudo mkswap /swapfile2
           sudo swapon /swapfile2
 
+      - name: Confirm Backend Selection
+        run: |
+          echo "=========================================="
+          echo "Selected Graphics Backend: ${{ inputs.backend }}"
+          echo "=========================================="
+
       - name: Checkout PPSSPP
         run: |
           if [ -n "${{ inputs.commit_sha }}" ]; then
@@ -51,11 +57,15 @@ jobs:
           platforms: arm64
           image: tonistiigi/binfmt:latest
 
-      - name: Build in Debian 11 (ARM64) Container
+      - name: Build PPSSPP (${{ inputs.backend }}) in Debian 11 Container
         run: |
           cat << 'EOF' > build_ppsspp.sh
           #!/bin/bash
           set -e
+
+          echo "=========================================="
+          echo " COMPILING PPSSPP FOR: $BACKEND"
+          echo "=========================================="
 
           echo '=== Bypassing QEMU ldconfig Crash ==='
           dpkg-divert --local --rename --add /sbin/ldconfig
@@ -146,7 +156,7 @@ jobs:
                 -DUSE_SYSTEM_LIBZIP=OFF \
                 -DUSE_SYSTEM_MINIUPNC=OFF
 
-          echo '=== Compiling PPSSPP ==='
+          echo "=== Compiling PPSSPP ($BACKEND) ==="
           make -j$(nproc) PPSSPPSDL
 
           echo '=== Packaging Standalone Binary and Assets ==='
@@ -155,7 +165,7 @@ jobs:
           cp PPSSPPSDL /build/output/
           cp -r ../assets/* /build/output/assets/
 
-          echo '=== Build Complete ==='
+          echo "=== Build Complete ($BACKEND) ==="
           EOF
 
           chmod +x build_ppsspp.sh
@@ -170,7 +180,7 @@ jobs:
             -e DEBIAN_FRONTEND=noninteractive \
             arm64v8/debian:11.11 /build/build_ppsspp.sh
 
-      - name: Upload Artifact
+      - name: Upload Artifact (${{ inputs.backend }})
         if: success()
         uses: actions/upload-artifact@v4
         with:
