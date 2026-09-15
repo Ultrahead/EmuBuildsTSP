@@ -141,4 +141,3 @@ jobs:
         with:
           name: hatariB_libretro_arm64_smartpro
           path: output/hatariB_libretro.so
-```[cite: 14]
