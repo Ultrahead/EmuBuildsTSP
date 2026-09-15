@@ -1,4 +1,4 @@
-name: Build PPSSPP (Standalone) Debian 11 ARM64 (TSP)
+name: Build PPSSPP (Standalone) Linux ARM64 (TSP)
 
 on:
   workflow_dispatch:
