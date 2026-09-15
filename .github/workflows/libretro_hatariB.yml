@@ -86,19 +86,24 @@ jobs:
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
-          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing"
-          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing"
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing -fsigned-char"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto -fno-strict-aliasing -fsigned-char"
           export LDFLAGS="-L/sdl2/lib -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
           export AR="gcc-ar"
           export RANLIB="gcc-ranlib"
 
-          echo '=== Compiling HatariB ==='
+          echo '=== Initializing Submodules ==='
           cd /build/hatariB
-          
-          # Pre-sync submodules to ensure no network issues mid-make
           git submodule update --init --recursive
           
-          # Native ARM64 build via QEMU
+          echo '=== Patching Hatari Generator Tools for QEMU / ARM64 ==='
+          # Prevent build-time opcode generators from miscompiling under LTO/O3 or failing on unsigned char
+          cat << 'CPUEOF' >> hatari/src/cpu/CMakeLists.txt
+          set_target_properties(build68k PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char" LINK_FLAGS "-O0 -fno-lto")
+          set_target_properties(gencpu PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char" LINK_FLAGS "-O0 -fno-lto")
+          CPUEOF
+
+          echo '=== Compiling HatariB ==='
           make -j$(nproc) full
 
           echo '=== Renaming and Stripping Binary ==='
