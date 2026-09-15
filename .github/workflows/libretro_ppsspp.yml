@@ -1,0 +1,152 @@
+name: Build PPSSPP (Libretro) Debian 11 ARM64 (TSP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full commit SHA to clone (leave blank for latest)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Runner Disk Space & Create Swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo fallocate -l 6G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+
+      - name: Checkout PPSSPP
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            echo "Cloning repository and checking out specific commit: ${{ inputs.commit_sha }}"
+            git init ppsspp
+            cd ppsspp
+            git remote add origin https://github.com/hrydgard/ppsspp.git
+            git fetch --depth 1 origin ${{ inputs.commit_sha }}
+            git checkout FETCH_HEAD
+            git submodule update --init --recursive --depth 1
+          else
+            echo "Cloning latest repository"
+            git clone --recurse-submodules --depth 1 https://github.com/hrydgard/ppsspp.git ppsspp
+          fi
+
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt:latest
+
+      - name: Build in Debian 11 (ARM64) Container
+        run: |
+          cat << 'EOF' > build_ppsspp_libretro.sh
+          #!/bin/bash
+          set -e
+
+          echo '=== Bypassing QEMU ldconfig Crash ==='
+          dpkg-divert --local --rename --add /sbin/ldconfig
+          ln -sf /bin/true /sbin/ldconfig
+
+          echo '=== Configuring APT for Archived Repositories ==='
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
+
+          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 1001
+          EOF_PREF
+
+          echo '=== Installing Build Dependencies ==='
+          apt-get update
+          apt-get dist-upgrade -y --allow-downgrades
+          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make \
+                  python3 python3-pip libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev \
+                  libpng-dev libzip-dev libsnappy-dev libzstd-dev
+
+          pip3 install cmake
+
+          echo '=== Safeguard: Fixing Permissions and Git Trust ==='
+          chown -R root:root /build
+          git config --global --add safe.directory '*'
+
+          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+          export LDFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
+
+          echo '=== Configuring PPSSPP Libretro Core ==='
+          cd /build/ppsspp
+          mkdir -p build && cd build
+
+          cmake .. -Wno-dev \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_CXX_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DCMAKE_SHARED_LINKER_FLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto" \
+                -DLIBRETRO=ON \
+                -DHEADLESS=OFF \
+                -DUSING_GLES2=ON \
+                -DVULKAN=ON \
+                -DARM_NO_VULKAN=OFF \
+                -DUSING_EGL=OFF \
+                -DUSING_FBDEV=OFF \
+                -DUSING_QT_UI=OFF \
+                -DUSE_WAYLAND_WSI=OFF \
+                -DUSING_X11_VULKAN=OFF \
+                -DUSE_DISCORD=OFF \
+                -DARM=ON \
+                -DARMIPS=ON \
+                -DUSE_ARMIPS=ON \
+                -DENABLE_OPT=ON \
+                -DENABLE_HLSL=ON \
+                -DENABLE_PCH=OFF \
+                -DSKIP_GLSLANG_INSTALL=ON \
+                -DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=ON \
+                -DUSE_FFMPEG=ON \
+                -DUSE_SYSTEM_FFMPEG=OFF \
+                -DUSE_SYSTEM_LIBPNG=ON \
+                -DUSE_SYSTEM_SNAPPY=OFF \
+                -DUSE_SYSTEM_ZSTD=OFF \
+                -DUSE_SYSTEM_LIBZIP=OFF \
+                -DUSE_SYSTEM_MINIUPNC=OFF
+
+          echo '=== Compiling Libretro Core ==='
+          make -j$(nproc) ppsspp_libretro
+
+          echo '=== Packaging Core and Assets ==='
+          mkdir -p /build/output/assets
+          if [ -f "lib/ppsspp_libretro.so" ]; then
+            strip lib/ppsspp_libretro.so
+            cp lib/ppsspp_libretro.so /build/output/
+          elif [ -f "ppsspp_libretro.so" ]; then
+            strip ppsspp_libretro.so
+            cp ppsspp_libretro.so /build/output/
+          fi
+          cp -r ../assets/* /build/output/assets/
+
+          echo '=== Build Complete ==='
+          EOF
+
+          chmod +x build_ppsspp_libretro.sh
+
+          docker run --rm \
+            --platform linux/arm64 \
+            --cpus="4.0" \
+            --cpu-shares=4096 \
+            --memory="6g" \
+            -v ${{ github.workspace }}:/build \
+            -e DEBIAN_FRONTEND=noninteractive \
+            arm64v8/debian:11.11 /build/build_ppsspp_libretro.sh
+
+      - name: Upload Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppsspp_libretro_tsp_arm64
+          path: output/
