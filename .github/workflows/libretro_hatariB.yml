@@ -11,18 +11,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      QEMU_STACK_SIZE: "67108864"
     
     steps:
-      - name: Maximize Runner Disk Space & Create Swap
+      - name: Maximize Runner Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo docker image prune --all --force
-          sudo fallocate -l 4G /swapfile2
-          sudo chmod 600 /swapfile2
-          sudo mkswap /swapfile2
-          sudo swapon /swapfile2
 
       - name: Checkout HatariB
         run: |
@@ -42,6 +36,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
+          image: tonistiigi/binfmt:latest
 
       - name: Build in Debian 11 (ARM64) Container
         run: |
@@ -49,68 +44,33 @@ jobs:
           #!/bin/bash
           set -e
           
-          echo '=== Bypassing QEMU ldconfig Crash ==='
-          dpkg-divert --local --rename --add /sbin/ldconfig
-          ln -sf /bin/true /sbin/ldconfig
-
-          echo '=== Configuring APT for Archived Repositories ==='
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-          echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
-
-          cat << 'EOF_PREF' > /etc/apt/preferences.d/00-archive
-          Package: *
-          Pin: release n=bullseye
-          Pin-Priority: 1001
-          EOF_PREF
-
           echo '=== Installing Build Dependencies ==='
           apt-get update
-          apt-get dist-upgrade -y --allow-downgrades
-          apt-get install -y --allow-downgrades build-essential git wget unzip pkg-config coreutils make cmake zlib1g-dev
+          # Added zlib1g-dev to provide zlib.h
+          apt-get install -y build-essential git wget unzip pkg-config coreutils make cmake zlib1g-dev
           
           echo '=== Safeguard: Fixing Permissions and Git Trust ==='
           chown -R root:root /build
           git config --global --add safe.directory '*'
 
-          echo '=== Configuring Stack Limits for QEMU ==='
-          ulimit -s unlimited 2>/dev/null || ulimit -s 65536 2>/dev/null || true
-          export QEMU_STACK_SIZE=67108864
-
           echo '=== Deploying Custom SDL2 Blob ==='
           wget -q https://raw.githubusercontent.com/Ultrahead/EmuBuildsTSP/main/blobs/SDL2-2.26.1_TSP.zip
           mkdir -p /sdl2
           unzip -q SDL2-2.26.1_TSP.zip -d /sdl2
-          chmod -R +x /sdl2/bin
           
           # Environment Setup
           export PATH="/sdl2/bin:$PATH"
           export PKG_CONFIG_PATH="/sdl2/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CPATH="/sdl2/include/SDL2:$CPATH"
           export LIBRARY_PATH="/sdl2/lib:$LIBRARY_PATH"
-          export CFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -mno-unaligned-access -flto -fno-strict-aliasing -fsigned-char"
-          export CXXFLAGS="-O3 -mcpu=cortex-a53 -mtune=cortex-a53 -mno-unaligned-access -flto -fno-strict-aliasing -fsigned-char"
-          export LDFLAGS="-L/sdl2/lib -O3 -mcpu=cortex-a53 -mtune=cortex-a53 -flto"
-          export AR="gcc-ar"
-          export RANLIB="gcc-ranlib"
-
-          echo '=== Initializing Submodules ==='
-          cd /build/hatariB
-          git submodule update --init --recursive
-          
-          echo '=== Patching Makefiles & Build Concurrency ==='
-          # 1. Eradicate -Werror to allow zlib configure to pass without aborting
-          sed -i 's/-Werror//g' makefile makefile.zlib
-          
-          # 2. Prevent unlimited parallel jobs (-j0) from crashing QEMU user emulation
-          sed -i 's/cmake --build \. -j/cmake --build \. -j$(nproc)/g' makefile
-
-          echo '=== Patching Hatari Generator Tools for QEMU / ARM64 ==='
-          cat << 'CPUEOF' >> hatari/src/cpu/CMakeLists.txt
-          set_target_properties(build68k PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
-          set_target_properties(gencpu PROPERTIES COMPILE_FLAGS "-O0 -fno-lto -fsigned-char -mno-unaligned-access" LINK_FLAGS "-O0 -fno-lto")
-          CPUEOF
 
           echo '=== Compiling HatariB ==='
+          cd /build/hatariB
+          
+          # Pre-sync submodules to ensure no network issues mid-make
+          git submodule update --init --recursive
+          
+          # Native ARM64 build via QEMU
           make -j$(nproc) full
 
           echo '=== Renaming and Stripping Binary ==='
@@ -134,8 +94,6 @@ jobs:
             --cpus="4.0" \
             --cpu-shares=4096 \
             --memory="6g" \
-            --ulimit stack=67108864:67108864 \
-            -e QEMU_STACK_SIZE=67108864 \
             -v ${{ github.workspace }}:/build \
             -e DEBIAN_FRONTEND=noninteractive \
             arm64v8/debian:11.11 /build/build_hatarib.sh
